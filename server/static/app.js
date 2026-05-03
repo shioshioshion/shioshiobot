@@ -1,10 +1,28 @@
 // 苔むす森のおしごと便り — Canvas visualisation of Claude Code agent activity.
+//
+// Layout per session (lane):
+//   ┌──────────────────────────────────────────────┐
+//   │ cwd-name                       おとどけずみ ♥ │  title (16px)
+//   │ "prompt summary…"                            │  prompt (14px, only if any)
+//   │ ▓ bubble row for agent 0                     │  speech zone:
+//   │ ▓ bubble row for agent 1                     │   one row (26px) per agent
+//   │ ▓ …                                          │   bubble border = agent body color
+//   │ moss + path with characters + postbox        │  ground (38px)
+//   └──────────────────────────────────────────────┘
+//
+// Lane height is dynamic: it grows downward as more agents appear so
+// nothing overlaps.
 
 const W = 480;
-const LANE_H = 100;
+const SCALE = 2;
 const HEADER_H = 30;
 const FOOTER_H = 16;
-const SCALE = 2;
+
+const TITLE_H = 16;
+const PROMPT_H = 14;
+const ROW_H = 26;
+const GROUND_H = 38;
+const MIN_LANE_H = TITLE_H + ROW_H + GROUND_H;
 
 const COLORS = {
   sky: "#cde6c8",
@@ -34,7 +52,7 @@ const COLORS = {
 
 let canvas, ctx;
 let state = { sessions: [], now: Date.now() / 1000 };
-let visuals = new Map(); // (sid:agent_id) -> { x, lastTool }
+let visuals = new Map(); // (sid:agent_id) -> { x }
 let serverNowOffset = 0;
 let frame = 0;
 
@@ -52,24 +70,13 @@ function init() {
 async function fetchState() {
   try {
     const r = await fetch("/state");
-    const s = await r.json();
-    state = s;
-    serverNowOffset = (Date.now() / 1000) - s.now;
+    state = await r.json();
+    serverNowOffset = (Date.now() / 1000) - state.now;
     resize();
-  } catch (e) { /* ignore — server may briefly be down */ }
+  } catch (e) { /* server may briefly be down */ }
 }
 
-function resize() {
-  const lanes = Math.max(1, visibleSessions().length);
-  const h = HEADER_H + lanes * LANE_H + FOOTER_H;
-  if (canvas.width !== W || canvas.height !== h) {
-    canvas.width = W;
-    canvas.height = h;
-    canvas.style.width = (W * SCALE) + "px";
-    canvas.style.height = (h * SCALE) + "px";
-    ctx.imageSmoothingEnabled = false;
-  }
-}
+function nowServer() { return Date.now() / 1000 - serverNowOffset; }
 
 function visibleSessions() {
   const active = state.sessions.filter(s => !s.ended_at);
@@ -79,8 +86,36 @@ function visibleSessions() {
   return [...active, ...ended];
 }
 
-function nowServer() {
-  return Date.now() / 1000 - serverNowOffset;
+function visibleAgents(s) {
+  const t = nowServer();
+  return Object.values(s.agents || {})
+    .filter(a => a.is_main || !a.ended || (a.ended_at == null) || (t - a.ended_at) < 8)
+    .sort((a, b) => {
+      // main first, then subs in birth order
+      if (a.is_main !== b.is_main) return a.is_main ? -1 : 1;
+      return (a.born_at || 0) - (b.born_at || 0);
+    });
+}
+
+function laneHeight(s) {
+  const agents = visibleAgents(s);
+  const promptH = s.current_prompt ? PROMPT_H : 0;
+  const speechH = Math.max(1, agents.length) * ROW_H;
+  return Math.max(MIN_LANE_H, TITLE_H + promptH + speechH + GROUND_H);
+}
+
+function resize() {
+  const sessions = visibleSessions();
+  let h = HEADER_H + FOOTER_H;
+  if (sessions.length === 0) h += 100;
+  else for (const s of sessions) h += laneHeight(s);
+  if (canvas.width !== W || canvas.height !== h) {
+    canvas.width = W;
+    canvas.height = h;
+    canvas.style.width = (W * SCALE) + "px";
+    canvas.style.height = (h * SCALE) + "px";
+    ctx.imageSmoothingEnabled = false;
+  }
 }
 
 function loop() {
@@ -97,9 +132,14 @@ function draw() {
 
   const sessions = visibleSessions();
   if (sessions.length === 0) {
-    drawIdle();
+    drawIdle(HEADER_H);
   } else {
-    sessions.forEach((s, i) => drawLane(s, HEADER_H + i * LANE_H));
+    let y = HEADER_H;
+    for (const s of sessions) {
+      const lh = laneHeight(s);
+      drawLane(s, y, lh);
+      y += lh;
+    }
   }
   drawFooter();
 }
@@ -144,18 +184,19 @@ function countActiveAgents() {
   return n;
 }
 
-function drawIdle() {
-  const y = HEADER_H;
+function drawIdle(yTop) {
+  const y = yTop;
+  const lh = 100;
   ctx.fillStyle = COLORS.moss1;
-  ctx.fillRect(0, y, W, LANE_H);
-  drawMossSpeckles(y);
-  drawPath(y);
-  drawMailbox(W - 32, y + LANE_H - 38);
-  drawTree(40, y + LANE_H - 36);
-  drawTree(380, y + LANE_H - 36);
-  drawMushroom(120, y + LANE_H - 18);
-  drawFern(220, y + LANE_H - 14);
-  drawMushroom(310, y + LANE_H - 18);
+  ctx.fillRect(0, y, W, lh);
+  drawMossSpeckles(y, lh);
+  drawPath(y, lh);
+  drawMailbox(W - 32, y + lh - GROUND_H);
+  drawTree(40, y + lh - 36);
+  drawTree(380, y + lh - 36);
+  drawMushroom(120, y + lh - 18);
+  drawFern(220, y + lh - 14);
+  drawMushroom(310, y + lh - 18);
 
   ctx.fillStyle = COLORS.bannerText;
   ctx.font = "10px monospace";
@@ -166,74 +207,193 @@ function drawIdle() {
   ctx.fillText("Claude Code がうごくと、ここに郵便屋さんがあらわれます。", 12, y + 22);
 }
 
-function drawLane(session, y) {
-  ctx.fillStyle = COLORS.moss1;
-  ctx.fillRect(0, y, W, LANE_H);
-  drawMossSpeckles(y);
-  drawDecor(session, y);
-  drawPath(y);
-  drawMailbox(W - 32, y + LANE_H - 38);
+function drawLane(session, yTop, lh) {
+  // ground is at the bottom GROUND_H px of the lane
+  const groundTop = yTop + lh - GROUND_H;
 
-  // session title
-  ctx.fillStyle = COLORS.laneTitle;
-  ctx.font = "bold 9px monospace";
-  ctx.textBaseline = "top";
+  // moss + decor + path live in the ground band
+  ctx.fillStyle = COLORS.moss1;
+  ctx.fillRect(0, groundTop, W, GROUND_H);
+  drawMossSpeckles(groundTop, GROUND_H);
+  drawDecor(session, groundTop);
+  drawPath(groundTop, GROUND_H);
+  drawMailbox(W - 32, groundTop);
+
+  // sky band above ground (where title, prompt, speech live)
+  // already painted via the global sky background; nothing to redraw
+
+  // title row
   const cwdName = (session.cwd || "").split("/").filter(Boolean).pop() || "(no cwd)";
-  ctx.fillText(`[${session.short_id}] ${cwdName}`, 6, y + 6);
+  ctx.fillStyle = COLORS.bannerBg;
+  ctx.fillRect(0, yTop, W, TITLE_H);
+  ctx.fillStyle = COLORS.laneTitle;
+  ctx.font = "bold 10px monospace";
+  ctx.textBaseline = "top";
+  ctx.textAlign = "left";
+  ctx.fillText(clipText(cwdName, W - 110), 6, yTop + 3);
+
+  if (session.ended_at) {
+    drawDeliveredBadge(W - 96, yTop + 2);
+  }
+
+  // prompt row (truncated to fit)
+  let speechTop = yTop + TITLE_H;
   if (session.current_prompt) {
     ctx.fillStyle = COLORS.laneTitleSub;
     ctx.font = "9px monospace";
-    ctx.fillText("“" + session.current_prompt + "”", 6, y + 18);
+    const promptText = "“" + session.current_prompt + "”";
+    ctx.fillText(clipText(promptText, W - 12), 6, yTop + TITLE_H + 1);
+    speechTop += PROMPT_H;
   }
 
-  // tool count badge
-  ctx.fillStyle = COLORS.bannerBg;
-  ctx.fillRect(W - 90, y + 6, 56, 12);
-  ctx.fillStyle = COLORS.bannerText;
-  ctx.font = "8px monospace";
-  ctx.fillText(`tools:${session.tool_count}`, W - 86, y + 8);
+  // characters: all walk on the same path centerline, with a small per-agent
+  // y stagger so they don't overlap when bunched at start/end.
+  const agents = visibleAgents(session);
+  const pathTopY = groundTop + 12; // path band starts here
+  const charBaseY = pathTopY - 14; // top of character (16px tall, feet at pathTop+2)
 
-  // ended overlay
-  if (session.ended_at) {
-    drawDeliveredBadge(W - 100, y + 22);
-  }
+  // Draw row identity (name + mission) and bubbles first.
+  agents.forEach((a, idx) => {
+    const v = ensureVisual(session, a);
+    v.x += (a.progress - v.x) * 0.06;
+    const charX = Math.round(24 + v.x * (W - 24 - 50));
+    drawAgentRowLabel(a, idx, speechTop);
+    drawBubbleForAgent(a, idx, speechTop, charX);
+  });
 
-  // agents
-  const agents = Object.values(session.agents || {});
-  // main first, then subs
-  agents.sort((a, b) => (a.is_main ? -1 : 0) - (b.is_main ? -1 : 0));
-  agents.forEach((a, idx) => drawAgent(a, session, y, idx));
+  agents.forEach((a, idx) => {
+    const v = ensureVisual(session, a);
+    const charX = Math.round(24 + v.x * (W - 24 - 50));
+    const stagger = idx * 3; // small vertical offset so bunched chars don't overlap
+    const moving = !a.ended && Math.abs(a.progress - v.x) > 0.002;
+    const f = moving ? Math.floor(frame / 8) : 0;
+    const bob = moving ? (Math.floor(frame / 8) % 2) : 0;
+    drawWalker(charX, charBaseY - stagger - bob, a.color || "#7bb274", f, a.is_main);
+  });
+}
+
+function ensureVisual(session, a) {
+  const key = (session.session_id || "x") + ":" + a.agent_id;
+  let v = visuals.get(key);
+  if (!v) { v = { x: 0 }; visuals.set(key, v); }
+  return v;
+}
+
+// Sticky identity label drawn on the left edge of each agent's row.
+// Format:  ●  なまえ・ミッション
+function drawAgentRowLabel(agent, agentIdx, speechTop) {
+  const rowTop = speechTop + agentIdx * ROW_H;
+  const cy = rowTop + Math.floor(ROW_H / 2);
+  const dotX = 6, dotY = cy - 3;
+  // colored dot (same as bubble border)
+  ctx.fillStyle = agent.color || COLORS.bubbleBorder;
+  ctx.fillRect(dotX, dotY, 6, 6);
+  ctx.fillStyle = shade(agent.color || "#777777", -30);
+  ctx.fillRect(dotX, dotY + 5, 6, 1);
+
+  // label text
+  ctx.font = "9px monospace";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = COLORS.text;
+  const mission = agent.mission || (agent.is_main ? "とりまとめ役" : "おつかい");
+  const sep = "・";
+  // truncate the mission so the whole label fits in ~half the canvas
+  const maxLabelW = Math.floor(W * 0.45);
+  const nameW = ctx.measureText(agent.name + sep).width;
+  const missionMaxW = Math.max(20, maxLabelW - nameW);
+  const missionShort = clipText(mission, missionMaxW);
+  ctx.fillText(agent.name + sep + missionShort, dotX + 9, rowTop + 4);
+}
+
+function drawBubbleForAgent(agent, agentIdx, speechTop, anchorX) {
+  if (!agent.say) return;
+  if (nowServer() >= (agent.say_until || 0) + 0.6) return;
+
+  const rowTop = speechTop + agentIdx * ROW_H;
+  const rowBottom = rowTop + ROW_H - 2;
+  const bubbleH = ROW_H - 6;            // ~20px
+  const bubbleY = rowBottom - bubbleH;
+
+  ctx.font = "9px monospace";
+  ctx.textBaseline = "top";
+  const maxW = Math.min(W - 16, 260);
+  const text = clipText(agent.say, maxW - 10);
+  const textW = Math.ceil(ctx.measureText(text).width);
+  const w = textW + 10;
+
+  let bx = anchorX - Math.floor(w / 2);
+  bx = Math.max(2, Math.min(W - w - 2, bx));
+  const by = bubbleY;
+
+  // bubble fill
+  ctx.fillStyle = COLORS.bubble;
+  ctx.fillRect(bx, by, w, bubbleH);
+  // colored border (matches agent coat color so you know who is talking)
+  const border = agent.color || COLORS.bubbleBorder;
+  ctx.fillStyle = border;
+  ctx.fillRect(bx, by, w, 1);
+  ctx.fillRect(bx, by + bubbleH - 1, w, 1);
+  ctx.fillRect(bx, by, 1, bubbleH);
+  ctx.fillRect(bx + w - 1, by, 1, bubbleH);
+  // little tail nub at bottom, anchored toward the character's x
+  const tailX = Math.max(bx + 3, Math.min(bx + w - 5, anchorX - 1));
+  ctx.fillStyle = COLORS.bubble;
+  ctx.fillRect(tailX, by + bubbleH, 2, 1);
+  ctx.fillStyle = border;
+  ctx.fillRect(tailX, by + bubbleH + 1, 1, 1);
+
+  // text
+  ctx.fillStyle = COLORS.text;
+  ctx.fillText(text, bx + 5, by + Math.floor((bubbleH - 9) / 2));
 }
 
 function drawDeliveredBadge(x, y) {
+  ctx.font = "bold 9px monospace";
+  const label = "おとどけずみ ♥";
+  const w = Math.ceil(ctx.measureText(label).width) + 8;
   ctx.fillStyle = COLORS.mailRed;
-  ctx.fillRect(x, y, 64, 12);
+  ctx.fillRect(x - (w - 84), y, w, 12);
   ctx.fillStyle = COLORS.bannerText;
-  ctx.font = "bold 8px monospace";
-  ctx.fillText("DELIVERED ♥", x + 4, y + 2);
+  ctx.textBaseline = "top";
+  ctx.fillText(label, x - (w - 84) + 4, y + 1);
 }
 
-function drawMossSpeckles(y) {
+// Truncate a string to fit within maxW pixels at the current ctx.font.
+function clipText(text, maxW) {
+  if (!text) return "";
+  if (ctx.measureText(text).width <= maxW) return text;
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    const candidate = text.slice(0, mid) + "…";
+    if (ctx.measureText(candidate).width <= maxW) lo = mid;
+    else hi = mid - 1;
+  }
+  return text.slice(0, lo) + "…";
+}
+
+function drawMossSpeckles(yTop, h) {
   ctx.fillStyle = COLORS.mossDot;
   for (let i = 0; i < W; i += 3) {
-    const yy = y + LANE_H - 14 - ((i * 7 + (y * 3)) % 11);
-    if ((i ^ y) & 5) continue;
+    const yy = yTop + h - 14 - ((i * 7 + (yTop * 3)) % 11);
+    if ((i ^ yTop) & 5) continue;
     ctx.fillRect(i, yy, 1, 1);
   }
   ctx.fillStyle = COLORS.moss2;
   for (let i = 0; i < W; i += 5) {
-    if ((i + y) % 7 < 3) continue;
-    ctx.fillRect(i, y + LANE_H - 6, 2, 2);
+    if ((i + yTop) % 7 < 3) continue;
+    ctx.fillRect(i, yTop + h - 6, 2, 2);
   }
 }
 
-function drawPath(y) {
+function drawPath(groundTop, groundH) {
+  const pathTop = groundTop + 12;
   ctx.fillStyle = COLORS.pathBase;
-  ctx.fillRect(20, y + LANE_H - 26, W - 40, 14);
+  ctx.fillRect(20, pathTop, W - 40, 14);
   ctx.fillStyle = COLORS.pathStone;
   for (let i = 24; i < W - 24; i += 12) {
-    ctx.fillRect(i, y + LANE_H - 24, 4, 2);
-    ctx.fillRect(i + 6, y + LANE_H - 18, 3, 2);
+    ctx.fillRect(i, pathTop + 2, 4, 2);
+    ctx.fillRect(i + 6, pathTop + 8, 3, 2);
   }
 }
 
@@ -254,7 +414,7 @@ function mulberry32(a) {
   };
 }
 
-function drawDecor(session, y) {
+function drawDecor(session, groundTop) {
   const seed = stringHash(session.session_id || "x");
   const rng = mulberry32(seed);
   const count = 6 + Math.floor(rng() * 4);
@@ -262,10 +422,11 @@ function drawDecor(session, y) {
     const x = Math.floor(rng() * (W - 80)) + 30;
     const k = Math.floor(rng() * 4);
     const dy = Math.floor(rng() * 4);
-    if (k === 0) drawMushroom(x, y + LANE_H - 16 - dy);
-    else if (k === 1) drawFern(x, y + LANE_H - 12 - dy);
-    else if (k === 2) drawTree(x, y + LANE_H - 36 - dy);
-    else drawSmallMushroom(x, y + LANE_H - 14 - dy);
+    const baseY = groundTop + 10; // top of path-ish
+    if (k === 0) drawMushroom(x, baseY - 8 - dy);
+    else if (k === 1) drawFern(x, baseY - 4 - dy);
+    else if (k === 2) drawTree(x, baseY - 28 - dy);
+    else drawSmallMushroom(x, baseY - 6 - dy);
   }
 }
 
@@ -325,47 +486,14 @@ function drawMailbox(x, y) {
   ctx.fillRect(x, y + 12, 12, 1);
 }
 
-function drawAgent(a, session, y, idx) {
-  const key = (session.session_id || "x") + ":" + a.agent_id;
-  let v = visuals.get(key);
-  if (!v) { v = { x: 0 }; visuals.set(key, v); }
-  const target = a.progress;
-  v.x += (target - v.x) * 0.06;
-
-  const startX = 24;
-  const endX = W - 36;
-  const px = Math.round(startX + v.x * (endX - startX));
-  const stack = a.is_main ? 0 : (1 + idx) * 5;
-  const py = y + LANE_H - 38 - stack;
-  const moving = !a.ended && Math.abs(target - v.x) > 0.002;
-  const f = moving ? Math.floor(frame / 8) : 0;
-  const bob = moving ? (Math.floor(frame / 8) % 2) : 0;
-
-  drawWalker(px, py - bob, a.color || "#7bb274", f, a.is_main);
-
-  // name
-  ctx.fillStyle = COLORS.bannerText;
-  ctx.font = "7px monospace";
-  ctx.textAlign = "center";
-  ctx.textBaseline = "top";
-  ctx.fillText(a.name, px + 6, py + 18);
-  ctx.textAlign = "left";
-
-  // speech bubble — show until say_until + small grace
-  const t = nowServer();
-  if (a.say && t < (a.say_until || 0) + 0.6) {
-    drawBubble(px + 6, py - 4, a.say);
-  }
-}
-
-function drawWalker(x, y, color, frame, isMain) {
+function drawWalker(x, y, color, frameIdx, isMain) {
   // shadow
   ctx.fillStyle = "rgba(0,0,0,0.25)";
   ctx.fillRect(x + 1, y + 16, 11, 1);
 
   // legs (walk cycle)
   ctx.fillStyle = "#3b2b1a";
-  if (frame % 2 === 0) {
+  if (frameIdx % 2 === 0) {
     ctx.fillRect(x + 3, y + 13, 2, 3);
     ctx.fillRect(x + 7, y + 13, 2, 2);
   } else {
@@ -378,7 +506,6 @@ function drawWalker(x, y, color, frame, isMain) {
   ctx.fillRect(x + 2, y + 7, 8, 6);
   ctx.fillStyle = shade(color, -25);
   ctx.fillRect(x + 2, y + 12, 8, 1);
-  // collar
   ctx.fillStyle = shade(color, -40);
   ctx.fillRect(x + 4, y + 7, 4, 1);
 
@@ -392,7 +519,6 @@ function drawWalker(x, y, color, frame, isMain) {
   // head
   ctx.fillStyle = "#f6dfa9";
   ctx.fillRect(x + 3, y + 3, 6, 5);
-  // eyes
   ctx.fillStyle = "#3b2b1a";
   ctx.fillRect(x + 5, y + 5, 1, 1);
   ctx.fillRect(x + 7, y + 5, 1, 1);
@@ -401,61 +527,16 @@ function drawWalker(x, y, color, frame, isMain) {
   ctx.fillStyle = isMain ? "#bf4a3a" : "#a08055";
   ctx.fillRect(x + 2, y + 1, 8, 2);
   ctx.fillRect(x + 1, y + 2, 11, 1);
-  // cap badge
   ctx.fillStyle = COLORS.mailBeige;
   ctx.fillRect(x + 5, y + 1, 2, 1);
 }
 
 function shade(hex, pct) {
   const c = hex.replace("#", "");
-  let r = parseInt(c.substr(0, 2), 16);
-  let g = parseInt(c.substr(2, 2), 16);
-  let b = parseInt(c.substr(4, 2), 16);
+  const r = parseInt(c.substr(0, 2), 16);
+  const g = parseInt(c.substr(2, 2), 16);
+  const b = parseInt(c.substr(4, 2), 16);
   const f = pct / 100;
   const adj = (v) => Math.max(0, Math.min(255, Math.round(v + (f < 0 ? v : 255 - v) * Math.abs(f))));
   return "#" + [adj(r), adj(g), adj(b)].map(v => v.toString(16).padStart(2, "0")).join("");
-}
-
-function wrap(text, n) {
-  const lines = [];
-  let s = String(text || "");
-  while (s.length > n) {
-    lines.push(s.slice(0, n));
-    s = s.slice(n);
-  }
-  if (s) lines.push(s);
-  return lines.slice(0, 3);
-}
-
-function drawBubble(anchorX, anchorY, text) {
-  ctx.font = "9px monospace";
-  ctx.textBaseline = "top";
-  const lines = wrap(text, 22);
-  const widths = lines.map(l => Math.ceil(ctx.measureText(l).width));
-  const w = Math.max(...widths) + 8;
-  const h = lines.length * 10 + 6;
-  let bx = anchorX - Math.floor(w / 2);
-  let by = anchorY - h - 4;
-  bx = Math.max(2, Math.min(W - w - 2, bx));
-  by = Math.max(HEADER_H + 2, by);
-
-  // bubble fill
-  ctx.fillStyle = COLORS.bubble;
-  ctx.fillRect(bx, by, w, h);
-  // border
-  ctx.fillStyle = COLORS.bubbleBorder;
-  ctx.fillRect(bx, by, w, 1);
-  ctx.fillRect(bx, by + h - 1, w, 1);
-  ctx.fillRect(bx, by, 1, h);
-  ctx.fillRect(bx + w - 1, by, 1, h);
-  // tail
-  const tailX = Math.max(bx + 4, Math.min(bx + w - 6, anchorX - 1));
-  ctx.fillStyle = COLORS.bubble;
-  ctx.fillRect(tailX, by + h, 2, 2);
-  ctx.fillStyle = COLORS.bubbleBorder;
-  ctx.fillRect(tailX, by + h + 2, 1, 1);
-
-  // text
-  ctx.fillStyle = COLORS.text;
-  lines.forEach((l, i) => ctx.fillText(l, bx + 4, by + 4 + i * 10));
 }

@@ -24,12 +24,11 @@ MAX_SESSIONS = 12
 ENDED_RETAIN_SEC = 90  # ended sessions linger this long for the goal animation
 
 NAME_POOL = [
-    "苔色のフィン", "蕨のミーシャ", "露草のリン", "翡翠のテオ",
-    "朝霧のノエル", "木漏れ日のサシャ", "雨上がりのユイ", "胞子のクラウス",
-    "こけももリリ", "風待ちのレオ", "小石のマルタ", "どんぐりのカイ",
-    "針葉樹のオリ", "こもれびソラ", "森番のフェリ", "夜露のミラ",
-    "若苔のジン", "枝垂れのヒナ", "こだまセラ", "下生えのトビ",
-    "霧雨のアンジュ", "蔦のロビン",
+    "そら", "あおい", "ひなた", "つむぎ", "いつき", "はる", "れん", "みお",
+    "こはる", "あかり", "しおん", "なずな", "すばる", "ことね", "まひろ",
+    "あさひ", "ねね", "せな", "なぎ", "いと", "すずな", "ゆずき", "ほたる",
+    "しずく", "ゆうな", "あおば", "ふう", "こはく", "つぐみ", "すみれ",
+    "いお", "なぎさ", "ゆきの", "やよい", "わかば", "つきの", "ひなの",
 ]
 COLOR_POOL = [
     "#7bb274", "#a8c97f", "#c2b280", "#d9a066", "#a0a060",
@@ -60,7 +59,9 @@ def color_for(seed: str, idx: int = 0) -> str:
 def short_path(p):
     if not p:
         return ""
-    return os.path.basename(str(p)) or str(p)
+    name = os.path.basename(str(p)) or str(p)
+    # paranoid: strip any remaining slashes/spaces
+    return name.strip().lstrip("/").strip()
 
 
 def first_words(s, n=30):
@@ -68,6 +69,105 @@ def first_words(s, n=30):
         return ""
     s = " ".join(str(s).split())
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+# Friendly verbs for common shell commands. The character speaks in-world
+# rather than echoing raw commands or paths.
+BASH_VERBS = {
+    "mkdir": "おうちをこしらえる",
+    "rmdir": "古いおうちをかたづける",
+    "cd":    "べつの場所へひととび",
+    "ls":    "あたりをきょろきょろ",
+    "pwd":   "いまどこかな…",
+    "cat":   "中身をちらりとのぞく",
+    "less":  "中身をちらりとのぞく",
+    "head":  "先頭をそっとのぞく",
+    "tail":  "末尾をそっとのぞく",
+    "rm":    "そっとおかたづけ",
+    "mv":    "荷物を運びなおす",
+    "cp":    "写しをこしらえる",
+    "touch": "あたらしい紙を一枚",
+    "echo":  "ひとりごとをつぶやく",
+    "git":   "巻物に記録する",
+    "gh":    "遠い森へ便りを出す",
+    "npm":   "道具袋を整える",
+    "yarn":  "道具袋を整える",
+    "pnpm":  "道具袋を整える",
+    "pip":   "道具袋を整える",
+    "pip3":  "道具袋を整える",
+    "uv":    "道具袋を整える",
+    "brew":  "道具袋を整える",
+    "python":  "まじないを唱える",
+    "python3": "まじないを唱える",
+    "node":  "まじないを唱える",
+    "deno":  "まじないを唱える",
+    "bun":   "まじないを唱える",
+    "go":    "まじないを唱える",
+    "cargo": "まじないを唱える",
+    "make":  "ふいごを動かす",
+    "curl":  "かぜのうわさをきく",
+    "wget":  "かぜのうわさをきく",
+    "find":  "森のなかをさがす",
+    "grep":  "あしあとを追う",
+    "rg":    "あしあとを追う",
+    "ag":    "あしあとを追う",
+    "sed":   "文字をなおす",
+    "awk":   "文字をなおす",
+    "sort":  "ならべかえる",
+    "uniq":  "重なりをとる",
+    "wc":    "かずをかぞえる",
+    "diff":  "ちがいをくらべる",
+    "tar":   "包みをむすぶ",
+    "zip":   "包みをむすぶ",
+    "unzip": "包みをほどく",
+    "docker":  "おおきな箱を動かす",
+    "kubectl": "箱の群れを動かす",
+    "open":  "とびらを開く",
+    "test":  "ためしてみる",
+    "pytest":   "ためしてみる",
+    "jest":     "ためしてみる",
+    "vitest":   "ためしてみる",
+    "tsc":      "巻物を仕立てなおす",
+    "eslint":   "言葉づかいを直す",
+    "prettier": "うつくしく整える",
+    "ruff":     "うつくしく整える",
+    "ssh":   "遠くの森へひととび",
+    "rsync": "荷物をきれいに運ぶ",
+    "scp":   "荷物を遠くへ運ぶ",
+    "launchctl": "見えない使い魔を動かす",
+    "killall":   "そっと幕を引く",
+    "kill":      "そっと幕を引く",
+    "ps":     "森のみんなの様子をみる",
+    "top":    "森のみんなの様子をみる",
+    "htop":   "森のみんなの様子をみる",
+    "sleep":  "ひとやすみ…",
+}
+
+
+def bash_speech(cmd):
+    if not cmd:
+        return "おまじないをひとつ唱えた"
+    parts = str(cmd).strip().split()
+    if not parts:
+        return "おまじないをひとつ唱えた"
+    name = parts[0].rsplit("/", 1)[-1]
+    if name == "sudo" and len(parts) > 1:
+        name = parts[1].rsplit("/", 1)[-1]
+    return BASH_VERBS.get(name, "おまじないをひとつ唱えた")
+
+
+def keyword_from_pattern(s):
+    """Strip paths and wildcards from a Glob/Grep pattern, returning a friendly keyword."""
+    if not s:
+        return "なにか"
+    s = str(s).strip().strip('"').strip("'")
+    s = s.rsplit("/", 1)[-1]
+    for ch in "*?[]{}":
+        s = s.replace(ch, "")
+    s = s.strip(". ")
+    if not s:
+        return "なにか"
+    return first_words(s, 12)
 
 
 def speech_for(event_name, tool_name, tool_input):
@@ -92,17 +192,18 @@ def speech_for(event_name, tool_name, tool_input):
         if tool_name == "MultiEdit":
             return f"「{short_path(ti.get('file_path',''))}」を何箇所か直す"
         if tool_name == "Bash":
-            return "$ " + first_words(ti.get("command", ""), 26)
+            return bash_speech(ti.get("command", ""))
         if tool_name == "Grep":
-            return f"「{first_words(ti.get('pattern',''),18)}」のあしあとを追う"
+            return f"「{keyword_from_pattern(ti.get('pattern',''))}」のあしあとを追う"
         if tool_name == "Glob":
-            return f"「{first_words(ti.get('pattern',''),18)}」のキノコを探す"
+            return f"「{keyword_from_pattern(ti.get('pattern',''))}」のキノコを探す"
         if tool_name == "WebFetch":
             return "かぜのうわさをきく…"
         if tool_name == "WebSearch":
-            return "もりの外をしらべる…"
+            q = first_words(ti.get("query", ""), 14)
+            return f"「{q}」を森の外でしらべる…" if q else "もりの外をしらべる…"
         if tool_name in ("Task", "Agent"):
-            d = first_words(ti.get("description", ti.get("prompt", "")), 22)
+            d = first_words(ti.get("description", ""), 20) or "おつかい"
             return f"後輩に「{d}」を頼んだ"
         if tool_name == "TodoWrite":
             return "やることリストを整える"
@@ -111,7 +212,7 @@ def speech_for(event_name, tool_name, tool_input):
         if tool_name and tool_name.startswith("mcp__"):
             return "ふしぎな道具を使ってる…"
         if tool_name:
-            return f"{tool_name} をつかってる"
+            return "ちいさな道具をつかってる"
         return "なにかしてる…"
     return ""
 
@@ -163,22 +264,28 @@ def ensure_agent(sid, agent_id, label=""):
     a = s["agents"].get(agent_id)
     if a is None:
         idx = len(s["agents"])
+        is_main = agent_id == "main"
+        mission = "とりまとめ役" if is_main else (label or "おつかい")
         a = {
             "agent_id": agent_id,
             "name": name_for(sid + agent_id, idx),
             "color": color_for(sid + agent_id, idx),
-            "is_main": agent_id == "main",
+            "is_main": is_main,
             "progress": 0.0,
             "tool_count": 0,
-            "say": "森の入口でしたくちゅう…" if agent_id == "main" else "おてつだいに来ました！",
+            "say": "森の入口でしたくちゅう…" if is_main else "おてつだいに来ました！",
             "say_until": now() + 5,
             "active": True,
             "ended": False,
+            "ended_at": None,
             "last_tool": None,
             "label": label,
+            "mission": mission,
             "born_at": now(),
         }
         s["agents"][agent_id] = a
+    elif label and not a.get("mission"):
+        a["mission"] = label
     return a
 
 
@@ -222,13 +329,14 @@ def handle_hook(payload):
             if sub:
                 sub["ended"] = True
                 sub["active"] = False
+                sub["ended_at"] = now()
                 sub["progress"] = 1.0
                 sub["say"] = speech_for(evt, None, None)
                 sub["say_until"] = now() + 5
             return
 
         if evt == "UserPromptSubmit":
-            s["current_prompt"] = first_words(payload.get("prompt", ""), 60)
+            s["current_prompt"] = first_words(payload.get("prompt", ""), 40)
             main = s["agents"]["main"]
             main["say"] = speech_for(evt, None, None)
             main["say_until"] = now() + 5
@@ -241,6 +349,7 @@ def handle_hook(payload):
                     a["progress"] = 1.0
                     a["ended"] = True
                     a["active"] = False
+                    a["ended_at"] = now()
                     a["say"] = speech_for("Stop", None, None)
                     a["say_until"] = now() + 8
             return
