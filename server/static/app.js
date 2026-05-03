@@ -59,7 +59,11 @@ let frame = 0;
 // --- audio (鈴の音) ---
 let audioCtx = null;
 let audioEnabled = localStorage.getItem("agentZooMute") !== "1";
-const ringedSessions = new Set();
+// Map session_id -> last seen ended_at value. We ring whenever this value
+// transitions from null/undefined → set, OR from one timestamp to a newer
+// one (multi-turn Claude Code sessions go ended → un-ended → ended → … and
+// must ring on every "ended" transition).
+const lastEndedAt = new Map();
 let firstFetchSeen = false;
 let audioToggleBtn = null;
 
@@ -179,11 +183,11 @@ function playBell() {
 }
 
 function maybeRingBells() {
-  // ring once when a session transitions to ended.
+  // ring whenever a session's ended_at transitions to a new truthy value.
   for (const s of state.sessions) {
-    if (s.ended_at && !ringedSessions.has(s.session_id)) {
-      ringedSessions.add(s.session_id);
-      // don't ring for sessions that were already ended on first page load
+    const prev = lastEndedAt.has(s.session_id) ? lastEndedAt.get(s.session_id) : undefined;
+    const cur = s.ended_at || null;
+    if (cur && cur !== prev) {
       if (firstFetchSeen) {
         console.log("[agent-zoo] session ended → ringing", s.session_id);
         playBell();
@@ -191,12 +195,12 @@ function maybeRingBells() {
         console.log("[agent-zoo] session was already ended at load (no chime):", s.session_id);
       }
     }
+    lastEndedAt.set(s.session_id, cur);
   }
-  // forget sessions that have rolled out of the state so a future re-use
-  // (very long-lived browser tab) can ring again.
+  // forget sessions that have rolled out of /state.
   const live = new Set(state.sessions.map(s => s.session_id));
-  for (const sid of ringedSessions) {
-    if (!live.has(sid)) ringedSessions.delete(sid);
+  for (const sid of Array.from(lastEndedAt.keys())) {
+    if (!live.has(sid)) lastEndedAt.delete(sid);
   }
   firstFetchSeen = true;
 }
