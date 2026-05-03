@@ -63,12 +63,23 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
   sleep 0.3
 done
 
-cat <<'EOF'
+EXT_DIR="$REPO_DIR/extension"
+
+cat <<EOF
 
 ✓ Installed.
   Open in your browser:  http://127.0.0.1:7777
-  Logs (if anything is off): ~/.claude-agent-zoo/server.log
-                              ~/.claude-agent-zoo/server.err.log
+  Logs (if anything is off):
+    ~/.claude-agent-zoo/server.log
+    ~/.claude-agent-zoo/server.err.log
+
+  To also see Claude.ai chats (browser) in the森:
+    1. Open Chrome / Brave / Edge / Arc
+    2. Visit  chrome://extensions
+    3. Toggle "Developer mode" (top right)
+    4. Click "Load unpacked" and choose this folder:
+         $EXT_DIR
+    5. Reload any open claude.ai tabs
 
   To uninstall:  ./uninstall.sh
 EOF

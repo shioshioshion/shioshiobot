@@ -199,7 +199,7 @@ def speech_for(event_name, tool_name, tool_input):
             return f"「{keyword_from_pattern(ti.get('pattern',''))}」のキノコを探す"
         if tool_name == "WebFetch":
             return "かぜのうわさをきく…"
-        if tool_name == "WebSearch":
+        if tool_name in ("WebSearch", "web_search"):
             q = first_words(ti.get("query", ""), 14)
             return f"「{q}」を森の外でしらべる…" if q else "もりの外をしらべる…"
         if tool_name in ("Task", "Agent"):
@@ -209,6 +209,19 @@ def speech_for(event_name, tool_name, tool_input):
             return "やることリストを整える"
         if tool_name == "NotebookEdit":
             return "ノートに書きこむ…"
+        # claude.ai web chat tools (sent by the browser extension)
+        if tool_name == "Thinking":
+            return "うーん、考えこんでる…"
+        if tool_name in ("Artifact", "create_artifact", "update_artifact"):
+            return "巻物をしたためる…"
+        if tool_name in ("Code", "code_execution", "repl"):
+            return "まじないを唱える"
+        if tool_name in ("Drive", "drive_search", "google_drive_search"):
+            return "むらの倉をのぞく"
+        if tool_name in ("Image", "create_image", "image_generation"):
+            return "絵筆をとる…"
+        if tool_name in ("ComputerUse", "computer_use"):
+            return "ふしぎな道具を使ってる…"
         if tool_name and tool_name.startswith("mcp__"):
             return "ふしぎな道具を使ってる…"
         if tool_name:
@@ -337,7 +350,17 @@ def handle_hook(payload):
 
         if evt == "UserPromptSubmit":
             s["current_prompt"] = first_words(payload.get("prompt", ""), 40)
+            # New round: un-end the lane, drop completed subagents, reset main.
+            s["ended_at"] = None
+            for k in list(s["agents"].keys()):
+                if k != "main" and s["agents"][k].get("ended"):
+                    del s["agents"][k]
             main = s["agents"]["main"]
+            main["progress"] = 0.0
+            main["tool_count"] = 0
+            main["ended"] = False
+            main["ended_at"] = None
+            main["active"] = True
             main["say"] = speech_for(evt, None, None)
             main["say_until"] = now() + 5
             return
@@ -378,12 +401,23 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a, **kw):
         pass  # quiet
 
+    def _cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors_headers()
+        self.end_headers()
+
     def _json(self, code, obj):
         body = json.dumps(obj, ensure_ascii=False).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self._cors_headers()
         self.end_headers()
         self.wfile.write(body)
 
