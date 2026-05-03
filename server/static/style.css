@@ -21,3 +21,29 @@ html, body {
   box-shadow: 0 6px 24px rgba(0,0,0,0.4);
   border: 2px solid #3b3a2a;
 }
+
+#audio-toggle {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  background: rgba(59,58,42,0.9);
+  color: #fdfdf2;
+  border: 1px solid #fdfdf2;
+  font-family: monospace;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  z-index: 10;
+  user-select: none;
+}
+#audio-toggle:hover {
+  background: rgba(59,58,42,1);
+}
+#audio-toggle.muted {
+  color: #888867;
+  border-color: #888867;
+  text-decoration: line-through;
+}

@@ -56,15 +56,116 @@ let visuals = new Map(); // (sid:agent_id) -> { x }
 let serverNowOffset = 0;
 let frame = 0;
 
+// --- audio (鈴の音) ---
+let audioCtx = null;
+let audioEnabled = localStorage.getItem("agentZooMute") !== "1";
+const ringedSessions = new Set();
+let firstFetchSeen = false;
+let audioToggleBtn = null;
+
 window.addEventListener("load", init);
 
 function init() {
   canvas = document.getElementById("stage");
   ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
+  initAudioToggle();
   fetchState();
   setInterval(fetchState, 1000);
   requestAnimationFrame(loop);
+}
+
+function initAudioToggle() {
+  audioToggleBtn = document.getElementById("audio-toggle");
+  if (!audioToggleBtn) return;
+  refreshAudioToggle();
+  audioToggleBtn.addEventListener("click", () => {
+    audioEnabled = !audioEnabled;
+    localStorage.setItem("agentZooMute", audioEnabled ? "0" : "1");
+    refreshAudioToggle();
+    if (audioEnabled) {
+      // confirmation chime so the user knows it's on
+      ensureAudio();
+      playBell();
+    }
+  });
+  // Audio contexts can't start until a user gesture. Resume on any click.
+  const wake = () => { ensureAudio(); };
+  window.addEventListener("click", wake);
+  window.addEventListener("keydown", wake);
+}
+
+function refreshAudioToggle() {
+  if (!audioToggleBtn) return;
+  audioToggleBtn.textContent = audioEnabled ? "♪" : "♪";
+  audioToggleBtn.classList.toggle("muted", !audioEnabled);
+  audioToggleBtn.title = audioEnabled ? "通知音 ON (押すとOFF)" : "通知音 OFF (押すとON)";
+}
+
+function ensureAudio() {
+  if (!audioEnabled) return;
+  if (!audioCtx) {
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) { audioCtx = null; }
+  }
+  if (audioCtx && audioCtx.state === "suspended") {
+    audioCtx.resume().catch(() => {});
+  }
+}
+
+// A simple sine-stack bell sound. No samples — entirely synthesised.
+// Inharmonic partial ratios give the shimmery metallic quality of a small
+// 鈴; an exponential decay envelope per partial makes it ring out softly.
+function playBell() {
+  if (!audioEnabled) return;
+  ensureAudio();
+  if (!audioCtx) return;
+
+  const t0 = audioCtx.currentTime + 0.01;
+  const fundamental = 1100;
+  const partials = [
+    { f: fundamental,         g: 0.30, d: 1.6 },
+    { f: fundamental * 1.5,   g: 0.18, d: 1.2 },
+    { f: fundamental * 2.0,   g: 0.10, d: 0.9 },
+    { f: fundamental * 2.95,  g: 0.06, d: 0.6 },
+    { f: fundamental * 4.07,  g: 0.04, d: 0.4 },
+  ];
+
+  const master = audioCtx.createGain();
+  master.gain.value = 0.45;
+  master.connect(audioCtx.destination);
+
+  for (const p of partials) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(p.f, t0);
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(p.g, t0 + 0.006);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + p.d);
+    osc.connect(gain).connect(master);
+    osc.start(t0);
+    osc.stop(t0 + p.d + 0.05);
+  }
+}
+
+function maybeRingBells() {
+  // ring once when a session transitions to ended.
+  for (const s of state.sessions) {
+    if (s.ended_at && !ringedSessions.has(s.session_id)) {
+      ringedSessions.add(s.session_id);
+      // don't ring for sessions that were already ended on first page load
+      if (firstFetchSeen) playBell();
+    }
+  }
+  // forget sessions that have rolled out of the state so a future re-use
+  // (very long-lived browser tab) can ring again.
+  const live = new Set(state.sessions.map(s => s.session_id));
+  for (const sid of ringedSessions) {
+    if (!live.has(sid)) ringedSessions.delete(sid);
+  }
+  firstFetchSeen = true;
 }
 
 async function fetchState() {
@@ -72,6 +173,7 @@ async function fetchState() {
     const r = await fetch("/state");
     state = await r.json();
     serverNowOffset = (Date.now() / 1000) - state.now;
+    maybeRingBells();
     resize();
   } catch (e) { /* server may briefly be down */ }
 }
