@@ -77,18 +77,35 @@ function init() {
 
 function initAudioToggle() {
   audioToggleBtn = document.getElementById("audio-toggle");
-  if (!audioToggleBtn) return;
+  const testBtn = document.getElementById("audio-test");
   refreshAudioToggle();
-  audioToggleBtn.addEventListener("click", () => {
-    audioEnabled = !audioEnabled;
-    localStorage.setItem("agentZooMute", audioEnabled ? "0" : "1");
-    refreshAudioToggle();
-    if (audioEnabled) {
-      // confirmation chime so the user knows it's on
+
+  if (testBtn) {
+    // Test button: always plays a chime AND wakes the audio context.
+    // This is the recommended way to "turn sound on" since AudioContext
+    // creation requires a user gesture.
+    testBtn.addEventListener("click", () => {
+      console.log("[agent-zoo] test chime requested");
+      if (!audioEnabled) {
+        // user clicked test while muted — un-mute so they actually hear it
+        audioEnabled = true;
+        localStorage.setItem("agentZooMute", "0");
+        refreshAudioToggle();
+      }
       ensureAudio();
       playBell();
-    }
-  });
+    });
+  }
+
+  if (audioToggleBtn) {
+    audioToggleBtn.addEventListener("click", () => {
+      audioEnabled = !audioEnabled;
+      localStorage.setItem("agentZooMute", audioEnabled ? "0" : "1");
+      refreshAudioToggle();
+      console.log("[agent-zoo] audio toggled:", audioEnabled ? "ON" : "OFF");
+    });
+  }
+
   // Audio contexts can't start until a user gesture. Resume on any click.
   const wake = () => { ensureAudio(); };
   window.addEventListener("click", wake);
@@ -97,9 +114,9 @@ function initAudioToggle() {
 
 function refreshAudioToggle() {
   if (!audioToggleBtn) return;
-  audioToggleBtn.textContent = audioEnabled ? "♪" : "♪";
+  audioToggleBtn.textContent = audioEnabled ? "通知音 ON" : "通知音 OFF";
   audioToggleBtn.classList.toggle("muted", !audioEnabled);
-  audioToggleBtn.title = audioEnabled ? "通知音 ON (押すとOFF)" : "通知音 OFF (押すとON)";
+  audioToggleBtn.title = audioEnabled ? "通知音をOFFにする" : "通知音をONにする";
 }
 
 function ensureAudio() {
@@ -118,9 +135,20 @@ function ensureAudio() {
 // Inharmonic partial ratios give the shimmery metallic quality of a small
 // 鈴; an exponential decay envelope per partial makes it ring out softly.
 function playBell() {
-  if (!audioEnabled) return;
+  if (!audioEnabled) {
+    console.log("[agent-zoo] bell suppressed: muted");
+    return;
+  }
   ensureAudio();
-  if (!audioCtx) return;
+  if (!audioCtx) {
+    console.log("[agent-zoo] bell suppressed: no AudioContext (browser may need a user click first)");
+    return;
+  }
+  if (audioCtx.state !== "running") {
+    console.log("[agent-zoo] bell suppressed: AudioContext state =", audioCtx.state, "(click anywhere on the page first)");
+    return;
+  }
+  console.log("[agent-zoo] ringing 鈴 ♪");
 
   const t0 = audioCtx.currentTime + 0.01;
   const fundamental = 1100;
@@ -156,7 +184,12 @@ function maybeRingBells() {
     if (s.ended_at && !ringedSessions.has(s.session_id)) {
       ringedSessions.add(s.session_id);
       // don't ring for sessions that were already ended on first page load
-      if (firstFetchSeen) playBell();
+      if (firstFetchSeen) {
+        console.log("[agent-zoo] session ended → ringing", s.session_id);
+        playBell();
+      } else {
+        console.log("[agent-zoo] session was already ended at load (no chime):", s.session_id);
+      }
     }
   }
   // forget sessions that have rolled out of the state so a future re-use

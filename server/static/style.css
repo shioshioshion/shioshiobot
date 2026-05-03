@@ -22,28 +22,38 @@ html, body {
   border: 2px solid #3b3a2a;
 }
 
-#audio-toggle {
+#audio-controls {
   position: fixed;
   top: 14px;
   right: 14px;
-  width: 36px;
-  height: 36px;
-  border-radius: 4px;
-  background: rgba(59,58,42,0.9);
+  display: flex;
+  gap: 6px;
+  z-index: 10;
+}
+#audio-controls button {
+  background: rgba(59,58,42,0.92);
   color: #fdfdf2;
   border: 1px solid #fdfdf2;
   font-family: monospace;
-  font-size: 16px;
+  font-size: 13px;
   line-height: 1;
   cursor: pointer;
-  z-index: 10;
   user-select: none;
+  padding: 6px 10px;
+  border-radius: 4px;
 }
-#audio-toggle:hover {
+#audio-controls button:hover {
   background: rgba(59,58,42,1);
+  transform: translateY(-1px);
+}
+#audio-controls button:active {
+  transform: translateY(0);
+}
+#audio-test {
+  font-size: 16px;
+  width: 34px;
 }
 #audio-toggle.muted {
   color: #888867;
   border-color: #888867;
-  text-decoration: line-through;
 }
