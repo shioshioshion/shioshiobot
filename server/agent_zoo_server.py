@@ -307,31 +307,40 @@ _MD_LINK_RE = __import__("re").compile(r"\[([^\]]+)\]\([^)]+\)")
 def summarize_prompt(prompt, max_chars=34):
     """Squeeze a long user prompt into a Slack-style mission line.
 
-    Keeps the substance (the mission topic) but drops the polite
-    request-closings ("〜してください", "〜教えて", etc.), takes only the
-    first clause, and tail-truncates with an ellipsis.
+    Goal: keep BOTH ends visible so the user can see the topic AND the
+    action verb at the same glance ("topic … verb"). Avoids the previous
+    bug where splitting at the first 「、」 dropped the actual request,
+    leaving only the problem statement.
+
+    Steps:
+      1. Strip Markdown auto-links (`[name](url)` → `name`).
+      2. Take only the first FULL SENTENCE if there is one (split at
+         。！？\n only — not 「、」, since that's still mid-sentence).
+      3. Repeatedly peel trailing politeness ("〜してください",
+         "〜教えてくれませんか", etc.).
+      4. If still too long, middle-truncate so the topic at the start
+         and the verb at the end both stay visible.
     """
     if not prompt:
         return ""
     p = " ".join(str(prompt).split())
-    # Strip markdown auto-links that some chat editors inject:
-    # `[CLAUDE.md](http://CLAUDE.md)` → `CLAUDE.md`.
     p = _MD_LINK_RE.sub(r"\1", p)
-    # Use only up to the first sentence/clause break (whichever comes
-    # first across these separators).
+
+    # Step 2 — sentence-level break (NOT 「、」, since that's still
+    # inside one sentence; cutting there would drop the request verb).
     cut_candidates = []
-    for sep in ("。", "！", "？", "\n", "、", "・"):
+    for sep in ("。", "！", "？", "\n"):
         i = p.find(sep)
         if i > 0:
             cut_candidates.append(i)
     if cut_candidates:
         i = min(cut_candidates)
-        # Need at least 6 characters before the break to be a useful
-        # mission line; otherwise fall through to the tail truncation.
-        if 6 < i < max_chars + 12:
+        # Need at least 6 chars before the break for it to be a useful
+        # mission line; otherwise fall through.
+        if 6 < i < max_chars + 24:
             p = p[:i]
-    # Drop trailing politeness/closings, repeatedly so chained fluff
-    # ("…してくれませんか？" → "…してくれません" → "…") all gets peeled.
+
+    # Step 3 — repeatedly peel trailing politeness.
     changed = True
     while changed:
         changed = False
@@ -340,9 +349,12 @@ def summarize_prompt(prompt, max_chars=34):
                 p = p[: -len(f)]
                 changed = True
         p = p.rstrip("、。 ?？!ー〜~ \t")
-    # Final tail truncate.
+
+    # Step 4 — if still too long, middle-truncate so both the topic
+    # (start) and the action verb (end) remain visible.
     if len(p) > max_chars:
-        p = p[: max_chars - 1] + "…"
+        half = (max_chars - 1) // 2
+        p = p[:half] + "…" + p[-(max_chars - half - 1):]
     return p
 
 

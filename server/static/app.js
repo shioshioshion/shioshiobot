@@ -161,7 +161,7 @@ const PERSONALITY_VOICE = {
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.14-slack-voice";
+const APP_VERSION = "0.15-middle-truncate";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
