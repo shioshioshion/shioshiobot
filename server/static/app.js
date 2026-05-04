@@ -25,30 +25,70 @@ const GROUND_H = 38;
 const MIN_LANE_H = TITLE_H + ROW_H + GROUND_H;
 
 const COLORS = {
-  sky: "#cde6c8",
-  moss1: "#5d8a5e",
-  moss2: "#446b48",
-  mossDot: "#6da26d",
-  pathBase: "#7d8c5b",
-  pathStone: "#9da973",
-  fernGreen: "#3a6b3f",
-  mushroomCap: "#c8473e",
-  mushroomCapDot: "#f4e9c8",
-  mushroomStem: "#f4e9c8",
-  mailRed: "#bf4a3a",
-  mailDark: "#5e2620",
-  mailBeige: "#f4e9c8",
-  trunk: "#6b4a2b",
-  leaves: "#5b8c4a",
-  leavesShade: "#3a6b3f",
   bubble: "#fdfdf2",
   bubbleBorder: "#3b3a2a",
   text: "#262320",
-  laneTitle: "#fdfdf2",
-  laneTitleSub: "#dde9c8",
   bannerBg: "#3b3a2a",
   bannerText: "#fdfdf2",
+  // shared sprite colors (postman & mailbox stay the same across themes)
+  mailRed: "#bf4a3a",
+  mailDark: "#5e2620",
+  mailBeige: "#f4e9c8",
+  // legacy aliases retained for unchanged sprites:
+  mushroomCap: "#c8473e",
+  mushroomCapDot: "#f4e9c8",
+  mushroomStem: "#f4e9c8",
+  trunk: "#6b4a2b",
+  leaves: "#5b8c4a",
+  leavesShade: "#3a6b3f",
+  fernGreen: "#3a6b3f",
 };
+
+// Each session is assigned one theme (deterministic by session_id) so the
+// scenery varies but stays stable across reloads. The postman, the path
+// and the mailbox are shared so every theme reads as "an おしごと郵便屋さん".
+const THEMES = [
+  { // 0: 苔の森
+    sky: "#cde6c8", ground: "#5d8a5e", groundDark: "#446b48", groundDot: "#6da26d",
+    pathBase: "#7d8c5b", pathStone: "#9da973",
+    titleDim: "#dde9c8",
+    decor: ["mushroom", "fern", "tree", "smallMushroom"],
+  },
+  { // 1: 砂浜の道
+    sky: "#bce0f0", ground: "#e0c894", groundDark: "#bea870", groundDot: "#f0d8a4",
+    pathBase: "#e8c890", pathStone: "#f5dba8",
+    titleDim: "#cce6f0",
+    decor: ["palm", "shell", "smallStone", "smallMushroom"],
+  },
+  { // 2: 夜の集落
+    sky: "#1f2349", ground: "#2a2e54", groundDark: "#161938", groundDot: "#5a6090",
+    pathBase: "#3d3b58", pathStone: "#5a5878",
+    titleDim: "#a8b0d8",
+    decor: ["lantern", "nightTree", "firefly", "star"],
+  },
+  { // 3: 雪の道
+    sky: "#dde8f0", ground: "#dee5e8", groundDark: "#a6b6c0", groundDot: "#ffffff",
+    pathBase: "#9eafbf", pathStone: "#dde8f0",
+    titleDim: "#dde8f0",
+    decor: ["pine", "snowMound", "snowflake", "smallStone"],
+  },
+  { // 4: 桜並木
+    sky: "#fae3ec", ground: "#a4c094", groundDark: "#7c987a", groundDot: "#e8b8d0",
+    pathBase: "#c8b090", pathStone: "#e0c4a4",
+    titleDim: "#f0c8de",
+    decor: ["cherryTree", "lantern", "fern", "smallMushroom"],
+  },
+  { // 5: 星空小径
+    sky: "#0e1238", ground: "#1d2255", groundDark: "#0d1130", groundDot: "#7884c4",
+    pathBase: "#3a4078", pathStone: "#6068a0",
+    titleDim: "#bcc8f0",
+    decor: ["star", "firefly", "lantern", "nightTree"],
+  },
+];
+
+function pickTheme(sessionId) {
+  return THEMES[stringHash(sessionId || "x") % THEMES.length];
+}
 
 let canvas, ctx;
 let state = { sessions: [], now: Date.now() / 1000 };
@@ -347,25 +387,26 @@ function drawIdle(yTop) {
 }
 
 function drawLane(session, yTop, lh) {
-  // ground is at the bottom GROUND_H px of the lane
+  const theme = pickTheme(session.session_id);
   const groundTop = yTop + lh - GROUND_H;
 
-  // moss + decor + path live in the ground band
-  ctx.fillStyle = COLORS.moss1;
+  // sky band — paint the lane's own sky color over the global background
+  ctx.fillStyle = theme.sky;
+  ctx.fillRect(0, yTop, W, lh - GROUND_H);
+
+  // ground (theme-colored)
+  ctx.fillStyle = theme.ground;
   ctx.fillRect(0, groundTop, W, GROUND_H);
-  drawMossSpeckles(groundTop, GROUND_H);
-  drawDecor(session, groundTop);
-  drawPath(groundTop, GROUND_H);
+  drawGroundSpeckles(groundTop, GROUND_H, theme);
+  drawDecor(session, groundTop, theme);
+  drawPath(groundTop, GROUND_H, theme);
   drawMailbox(W - 32, groundTop);
 
-  // sky band above ground (where title, prompt, speech live)
-  // already painted via the global sky background; nothing to redraw
-
-  // title row
+  // title row — keep dark-on-light for legibility regardless of theme
   const cwdName = (session.cwd || "").split("/").filter(Boolean).pop() || "(no cwd)";
   ctx.fillStyle = COLORS.bannerBg;
   ctx.fillRect(0, yTop, W, TITLE_H);
-  ctx.fillStyle = COLORS.laneTitle;
+  ctx.fillStyle = COLORS.bannerText;
   ctx.font = "bold 10px monospace";
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
@@ -375,10 +416,11 @@ function drawLane(session, yTop, lh) {
     drawDeliveredBadge(W - 96, yTop + 2);
   }
 
-  // prompt row (truncated to fit)
+  // prompt row (truncated to fit) — text color follows theme so it stays
+  // readable on dark sky themes too
   let speechTop = yTop + TITLE_H;
   if (session.current_prompt) {
-    ctx.fillStyle = COLORS.laneTitleSub;
+    ctx.fillStyle = theme.titleDim;
     ctx.font = "9px monospace";
     const promptText = "“" + session.current_prompt + "”";
     ctx.fillText(clipText(promptText, W - 12), 6, yTop + TITLE_H + 1);
@@ -444,9 +486,29 @@ function drawAgentRowLabel(agent, agentIdx, speechTop) {
   ctx.fillText(agent.name + sep + missionShort, dotX + 9, rowTop + 4);
 }
 
+// Idle phrases shown when an agent has been quiet for a while. Rotates so
+// the character feels alive even when no new tools are firing.
+const IDLE_PHRASES = [
+  "ふむふむ…", "もうすこし…", "考えごと中…", "むむ…",
+  "じっくりと…", "そろそろかな…", "うーん…", "ぽやぽや",
+];
+
+function speechFor(agent) {
+  if (!agent.say) return null;
+  if (agent.ended) return agent.say; // keep the delivery message
+  const t = nowServer();
+  // say_until was set to ~5s after the last update; if it's well in the
+  // past, the agent is "idle" and we rotate through gentle phrases.
+  const lastUpdate = (agent.say_until || 0) - 5;
+  const elapsed = t - lastUpdate;
+  if (elapsed < 12) return agent.say;
+  const idx = Math.floor(t / 3) % IDLE_PHRASES.length;
+  return IDLE_PHRASES[idx];
+}
+
 function drawBubbleForAgent(agent, agentIdx, speechTop, anchorX) {
-  if (!agent.say) return;
-  if (nowServer() >= (agent.say_until || 0) + 0.6) return;
+  const text0 = speechFor(agent);
+  if (!text0) return;
 
   const rowTop = speechTop + agentIdx * ROW_H;
   const rowBottom = rowTop + ROW_H - 2;
@@ -456,7 +518,7 @@ function drawBubbleForAgent(agent, agentIdx, speechTop, anchorX) {
   ctx.font = "9px monospace";
   ctx.textBaseline = "top";
   const maxW = Math.min(W - 16, 260);
-  const text = clipText(agent.say, maxW - 10);
+  const text = clipText(text0, maxW - 10);
   const textW = Math.ceil(ctx.measureText(text).width);
   const w = textW + 10;
 
@@ -511,25 +573,25 @@ function clipText(text, maxW) {
   return text.slice(0, lo) + "…";
 }
 
-function drawMossSpeckles(yTop, h) {
-  ctx.fillStyle = COLORS.mossDot;
+function drawGroundSpeckles(yTop, h, theme) {
+  ctx.fillStyle = theme.groundDot;
   for (let i = 0; i < W; i += 3) {
     const yy = yTop + h - 14 - ((i * 7 + (yTop * 3)) % 11);
     if ((i ^ yTop) & 5) continue;
     ctx.fillRect(i, yy, 1, 1);
   }
-  ctx.fillStyle = COLORS.moss2;
+  ctx.fillStyle = theme.groundDark;
   for (let i = 0; i < W; i += 5) {
     if ((i + yTop) % 7 < 3) continue;
     ctx.fillRect(i, yTop + h - 6, 2, 2);
   }
 }
 
-function drawPath(groundTop, groundH) {
+function drawPath(groundTop, groundH, theme) {
   const pathTop = groundTop + 12;
-  ctx.fillStyle = COLORS.pathBase;
+  ctx.fillStyle = theme.pathBase;
   ctx.fillRect(20, pathTop, W - 40, 14);
-  ctx.fillStyle = COLORS.pathStone;
+  ctx.fillStyle = theme.pathStone;
   for (let i = 24; i < W - 24; i += 12) {
     ctx.fillRect(i, pathTop + 2, 4, 2);
     ctx.fillRect(i + 6, pathTop + 8, 3, 2);
@@ -553,19 +615,37 @@ function mulberry32(a) {
   };
 }
 
-function drawDecor(session, groundTop) {
+// Each entry takes (x, baseY) where baseY is roughly the top of the path
+// band; the function offsets upward to plant itself on/near the ground.
+const DECOR_FNS = {
+  mushroom:      (x, b) => drawMushroom(x, b - 8),
+  smallMushroom: (x, b) => drawSmallMushroom(x, b - 6),
+  fern:          (x, b) => drawFern(x, b - 4),
+  tree:          (x, b) => drawTree(x, b - 28),
+  palm:          (x, b) => drawPalm(x, b - 26),
+  shell:         (x, b) => drawShell(x, b - 4),
+  smallStone:    (x, b) => drawSmallStone(x, b - 4),
+  lantern:       (x, b) => drawLantern(x, b - 22),
+  nightTree:     (x, b) => drawNightTree(x, b - 26),
+  firefly:       (x, b) => drawFirefly(x, b - 16),
+  star:          (x, b) => drawStar(x, b - 18),
+  pine:          (x, b) => drawPine(x, b - 26),
+  snowMound:     (x, b) => drawSnowMound(x, b - 6),
+  snowflake:     (x, b) => drawSnowflake(x, b - 18),
+  cherryTree:    (x, b) => drawCherryTree(x, b - 28),
+};
+
+function drawDecor(session, groundTop, theme) {
   const seed = stringHash(session.session_id || "x");
   const rng = mulberry32(seed);
   const count = 6 + Math.floor(rng() * 4);
   for (let i = 0; i < count; i++) {
     const x = Math.floor(rng() * (W - 80)) + 30;
-    const k = Math.floor(rng() * 4);
     const dy = Math.floor(rng() * 4);
-    const baseY = groundTop + 10; // top of path-ish
-    if (k === 0) drawMushroom(x, baseY - 8 - dy);
-    else if (k === 1) drawFern(x, baseY - 4 - dy);
-    else if (k === 2) drawTree(x, baseY - 28 - dy);
-    else drawSmallMushroom(x, baseY - 6 - dy);
+    const baseY = groundTop + 10 - dy;
+    const name = theme.decor[Math.floor(rng() * theme.decor.length)];
+    const fn = DECOR_FNS[name] || DECOR_FNS.smallMushroom;
+    fn(x, baseY);
   }
 }
 
@@ -607,6 +687,160 @@ function drawTree(x, y) {
   ctx.fillRect(x + 1, y + 9, 2, 2);
   ctx.fillRect(x + 7, y + 6, 2, 2);
   ctx.fillRect(x + 5, y + 11, 2, 2);
+}
+
+// --- new sprites for varied themes ---
+
+function drawPalm(x, y) {
+  // bent trunk
+  ctx.fillStyle = "#7a5a32";
+  ctx.fillRect(x + 4, y + 12, 2, 12);
+  ctx.fillRect(x + 5, y + 8, 2, 4);
+  ctx.fillRect(x + 6, y + 6, 2, 2);
+  // fronds
+  ctx.fillStyle = "#4a8b58";
+  ctx.fillRect(x, y + 4, 5, 1);
+  ctx.fillRect(x - 1, y + 5, 4, 1);
+  ctx.fillRect(x + 7, y + 4, 5, 1);
+  ctx.fillRect(x + 9, y + 5, 4, 1);
+  ctx.fillRect(x + 1, y + 2, 4, 2);
+  ctx.fillRect(x + 7, y + 2, 4, 2);
+  ctx.fillRect(x + 4, y, 5, 2);
+  // coconuts
+  ctx.fillStyle = "#3a2a1a";
+  ctx.fillRect(x + 5, y + 5, 1, 1);
+  ctx.fillRect(x + 7, y + 6, 1, 1);
+}
+
+function drawShell(x, y) {
+  ctx.fillStyle = "#f0c4d4";
+  ctx.fillRect(x + 1, y + 1, 5, 1);
+  ctx.fillRect(x, y + 2, 7, 2);
+  ctx.fillStyle = "#c89aae";
+  ctx.fillRect(x + 1, y + 2, 1, 1);
+  ctx.fillRect(x + 3, y + 1, 1, 2);
+  ctx.fillRect(x + 5, y + 2, 1, 1);
+  ctx.fillStyle = "#a07088";
+  ctx.fillRect(x + 1, y + 4, 5, 1);
+}
+
+function drawSmallStone(x, y) {
+  ctx.fillStyle = "#9b958a";
+  ctx.fillRect(x, y + 1, 5, 2);
+  ctx.fillRect(x + 1, y, 3, 1);
+  ctx.fillStyle = "#776f64";
+  ctx.fillRect(x, y + 3, 5, 1);
+  ctx.fillStyle = "#bcb6ab";
+  ctx.fillRect(x + 1, y + 1, 1, 1);
+}
+
+function drawLantern(x, y) {
+  // post
+  ctx.fillStyle = "#3b2a1c";
+  ctx.fillRect(x + 4, y + 8, 2, 14);
+  // lantern body
+  ctx.fillStyle = "#a04a2a";
+  ctx.fillRect(x + 1, y + 2, 8, 6);
+  ctx.fillStyle = "#3b2a1c";
+  ctx.fillRect(x, y + 1, 10, 1);
+  ctx.fillRect(x, y + 8, 10, 1);
+  // glow
+  ctx.fillStyle = "#f6e08a";
+  ctx.fillRect(x + 3, y + 4, 4, 2);
+  // tiny halo dots (only readable on dark themes, harmless on light)
+  ctx.fillStyle = "#f6e08a";
+  ctx.fillRect(x - 1, y + 4, 1, 1);
+  ctx.fillRect(x + 10, y + 4, 1, 1);
+}
+
+function drawNightTree(x, y) {
+  ctx.fillStyle = "#4a3a26";
+  ctx.fillRect(x + 4, y + 14, 3, 10);
+  ctx.fillStyle = "#2c5a3a";
+  ctx.fillRect(x, y + 6, 11, 9);
+  ctx.fillRect(x + 1, y + 4, 9, 2);
+  ctx.fillRect(x + 3, y + 2, 5, 2);
+  ctx.fillStyle = "#1a3a2a";
+  ctx.fillRect(x + 2, y + 10, 2, 2);
+  ctx.fillRect(x + 7, y + 8, 2, 2);
+}
+
+function drawFirefly(x, y) {
+  // small floating light
+  const flick = (frame >> 3) % 2;
+  ctx.fillStyle = flick ? "#f6e08a" : "#fff8c0";
+  ctx.fillRect(x + 1, y + 1, 2, 2);
+  ctx.fillStyle = "rgba(246, 224, 138, 0.4)";
+  ctx.fillRect(x, y, 1, 1);
+  ctx.fillRect(x + 3, y, 1, 1);
+  ctx.fillRect(x, y + 3, 1, 1);
+  ctx.fillRect(x + 3, y + 3, 1, 1);
+}
+
+function drawStar(x, y) {
+  ctx.fillStyle = "#fdfdf2";
+  ctx.fillRect(x + 1, y, 1, 3);
+  ctx.fillRect(x, y + 1, 3, 1);
+  ctx.fillStyle = "#a8b0d8";
+  ctx.fillRect(x + 1, y + 3, 1, 1);
+}
+
+function drawPine(x, y) {
+  ctx.fillStyle = "#5a3a22";
+  ctx.fillRect(x + 4, y + 18, 3, 6);
+  // stacked triangles
+  ctx.fillStyle = "#2a5a3a";
+  ctx.fillRect(x + 2, y + 14, 7, 4);
+  ctx.fillRect(x + 1, y + 12, 9, 2);
+  ctx.fillStyle = "#3a6b4a";
+  ctx.fillRect(x + 3, y + 8, 5, 4);
+  ctx.fillRect(x + 2, y + 10, 7, 1);
+  ctx.fillStyle = "#4a7c5a";
+  ctx.fillRect(x + 4, y + 4, 3, 4);
+  ctx.fillRect(x + 5, y + 2, 1, 2);
+  // snow on top
+  ctx.fillStyle = "#fdfdf2";
+  ctx.fillRect(x + 5, y + 1, 1, 1);
+  ctx.fillRect(x + 4, y + 5, 1, 1);
+  ctx.fillRect(x + 7, y + 5, 1, 1);
+  ctx.fillRect(x + 8, y + 13, 1, 1);
+}
+
+function drawSnowMound(x, y) {
+  ctx.fillStyle = "#fdfdf2";
+  ctx.fillRect(x, y + 2, 8, 3);
+  ctx.fillRect(x + 1, y + 1, 6, 1);
+  ctx.fillRect(x + 2, y, 4, 1);
+  ctx.fillStyle = "#dde8f0";
+  ctx.fillRect(x, y + 5, 8, 1);
+}
+
+function drawSnowflake(x, y) {
+  ctx.fillStyle = "#fdfdf2";
+  ctx.fillRect(x + 2, y, 1, 5);
+  ctx.fillRect(x, y + 2, 5, 1);
+  ctx.fillRect(x + 1, y + 1, 1, 1);
+  ctx.fillRect(x + 3, y + 1, 1, 1);
+  ctx.fillRect(x + 1, y + 3, 1, 1);
+  ctx.fillRect(x + 3, y + 3, 1, 1);
+}
+
+function drawCherryTree(x, y) {
+  // trunk
+  ctx.fillStyle = "#6b4a2b";
+  ctx.fillRect(x + 4, y + 14, 3, 10);
+  // canopy: pink puffs
+  ctx.fillStyle = "#f0a8c4";
+  ctx.fillRect(x, y + 4, 11, 9);
+  ctx.fillRect(x + 1, y + 2, 9, 2);
+  ctx.fillRect(x + 3, y, 5, 2);
+  ctx.fillStyle = "#d088a8";
+  ctx.fillRect(x + 1, y + 9, 2, 2);
+  ctx.fillRect(x + 7, y + 6, 2, 2);
+  // a couple of fallen petals
+  ctx.fillStyle = "#f8c4d8";
+  ctx.fillRect(x + 5, y + 12, 1, 1);
+  ctx.fillRect(x + 2, y + 13, 1, 1);
 }
 
 function drawMailbox(x, y) {
