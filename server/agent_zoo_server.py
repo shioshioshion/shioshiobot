@@ -99,6 +99,44 @@ def intro_phrase_for(personality, prompt, seed=""):
     idx = stable_hash("intro:" + str(seed) + ":" + str(prompt)[:80]) % len(phrases)
     return phrases[idx]
 
+
+# Attention-grabbing lines for when Claude Code sends a Notification
+# (waiting for user input / approval / answer). Personality-flavoured
+# so the same character speaks consistently — and so the user can learn
+# to recognise "this is so-and-so calling for me".
+HELP_PHRASES = {
+    "energetic": [
+        "ご主人さま、ちょっと来てー！",
+        "おーい！見てほしい！",
+        "判断おねがいしますっ！",
+        "こっち来てー！助けてー！",
+    ],
+    "calm": [
+        "あの、ご相談があります",
+        "ご確認、いただけますか",
+        "お時間よろしいですか？",
+        "判断をおねがいします",
+    ],
+    "shy": [
+        "あの…ちょっと、ご相談…",
+        "おねがい、できますか…",
+        "ご主人さま…来てください…",
+        "た、助けてください…",
+    ],
+    "playful": [
+        "ねえねえー！こっちこっちー！",
+        "ご主人さま、出番ですよー♪",
+        "ちょっとちょっと、相談ー！",
+        "ヘルプーっ！来てー！",
+    ],
+}
+
+
+def help_phrase_for(personality, seed=""):
+    pool = HELP_PHRASES.get(personality) or HELP_PHRASES["calm"]
+    idx = stable_hash("help:" + str(seed) + ":" + str(now())) % len(pool)
+    return pool[idx]
+
 state_lock = threading.Lock()
 sessions = {}  # session_id -> dict
 
@@ -361,6 +399,8 @@ def ensure_agent(sid, agent_id, label=""):
             "mission": mission,
             "intro_phrase": "",
             "intro_at": 0,
+            "help_phrase": "",
+            "help_at": 0,
             "born_at": now(),
         }
         s["agents"][agent_id] = a
@@ -378,6 +418,18 @@ def set_intro(agent, prompt):
     agent["intro_at"] = now()
     agent["say"] = phrase
     agent["say_until"] = now() + 8
+
+
+def call_for_help(agent):
+    """Stamp the agent with an attention-grabbing line. The client rings
+    the bell AND speaks it, so the user notices that this session is
+    waiting on them (Claude Code Notification hook)."""
+    phrase = help_phrase_for(agent.get("personality") or "calm",
+                             seed=agent.get("agent_id", ""))
+    agent["help_phrase"] = phrase
+    agent["help_at"] = now()
+    agent["say"] = phrase
+    agent["say_until"] = now() + 12
 
 
 def latest_active_subagent(s):
@@ -460,9 +512,10 @@ def handle_hook(payload):
             return  # session already created above
 
         if evt == "Notification":
-            main = s["agents"]["main"]
-            main["say"] = speech_for(evt, None, None)
-            main["say_until"] = now() + 5
+            # Claude Code is waiting for the user (permission prompt, idle
+            # too long, etc.). Bump help_at so the client rings the bell
+            # AND has the postman speak an attention line.
+            call_for_help(s["agents"]["main"])
             return
 
         if evt in ("PreToolUse", "PostToolUse"):

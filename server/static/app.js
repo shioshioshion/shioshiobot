@@ -140,6 +140,9 @@ let audioEnabled = localStorage.getItem("agentZooMute") !== "1";
 const lastEndedAt = new Map();
 // Per-agent intro_at last seen. Speak when a new value arrives.
 const lastIntroAt = new Map();
+// Per-agent help_at last seen. When it advances we ring the bell AND
+// speak the help line so the user notices a session waiting on them.
+const lastHelpAt = new Map();
 let firstFetchSeen = false;
 let audioToggleBtn = null;
 
@@ -158,7 +161,7 @@ const PERSONALITY_VOICE = {
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.8-cute-voice";
+const APP_VERSION = "0.9-help-call";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
@@ -406,18 +409,31 @@ function maybeSpeakIntros() {
   }
 }
 
-// Chrome on macOS tends to silently put speechSynthesis to sleep after
-// the tab has been idle for ~15 seconds. A no-op resume() every few
-// seconds keeps it warm so the next real intro plays without delay.
+// Chrome on macOS silently puts the audio stack to sleep after ~15s of
+// inactivity. Plain `resume()` is not enough — the only reliable cure is
+// to push a near-silent utterance through speechSynthesis on a steady
+// cadence so the engine never reaches the sleep state. We also keep the
+// Web Audio context resumed in the same loop, since it suffers the same
+// suspension at the OS level.
 setInterval(() => {
-  if (!("speechSynthesis" in window)) return;
-  if (!audioEnabled) return;
-  if (!window.__agentZooSpeechWarmed) return;
-  const ss = window.speechSynthesis;
-  if (!ss.speaking) {
-    try { ss.resume(); } catch (e) {}
+  // Web Audio: revive a suspended AudioContext.
+  if (audioCtx && audioCtx.state === "suspended") {
+    try { audioCtx.resume(); } catch (e) {}
   }
-}, 8000);
+  // Web Speech: keep the engine alive even when the user is muted —
+  // a silent utterance is inaudible and avoids the sleep that would
+  // make the FIRST real intro after un-muting come out silent.
+  if (!("speechSynthesis" in window)) return;
+  const ss = window.speechSynthesis;
+  if (ss.speaking || ss.pending) return; // mid-utterance, leave it alone
+  try {
+    ss.resume();
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    u.rate = 1.5;
+    ss.speak(u);
+  } catch (e) {}
+}, 10000);
 
 function maybeRingBells() {
   // ring whenever a session's ended_at transitions to a new truthy value.
@@ -447,10 +463,45 @@ async function fetchState() {
     const r = await fetch("/state");
     state = await r.json();
     serverNowOffset = (Date.now() / 1000) - state.now;
+    maybeCallForHelp();
     maybeSpeakIntros();
     maybeRingBells();
     resize();
   } catch (e) { /* server may briefly be down */ }
+}
+
+function maybeCallForHelp() {
+  // Same first-fetch handling as intros: prime the ledger but stay silent.
+  if (!firstFetchSeen) {
+    for (const s of state.sessions) {
+      for (const a of Object.values(s.agents || {})) {
+        const key = s.session_id + ":" + a.agent_id;
+        lastHelpAt.set(key, a.help_at || 0);
+      }
+    }
+    return;
+  }
+  for (const s of state.sessions) {
+    for (const a of Object.values(s.agents || {})) {
+      const key = s.session_id + ":" + a.agent_id;
+      const prev = lastHelpAt.get(key) || 0;
+      const cur = a.help_at || 0;
+      if (cur > prev && a.help_phrase) {
+        console.log("[agent-zoo] help requested by", a.name, "→", a.help_phrase);
+        // Bell first to draw the ear, then voice over the top.
+        playBell();
+        speakIntro(a.help_phrase, a);
+      }
+      lastHelpAt.set(key, cur);
+    }
+  }
+  const live = new Set();
+  for (const s of state.sessions) {
+    for (const a of Object.values(s.agents || {})) live.add(s.session_id + ":" + a.agent_id);
+  }
+  for (const k of Array.from(lastHelpAt.keys())) {
+    if (!live.has(k)) lastHelpAt.delete(k);
+  }
 }
 
 function nowServer() { return Date.now() / 1000 - serverNowOffset; }
@@ -650,6 +701,11 @@ function drawLane(session, yTop, lh) {
     const f = moving ? Math.floor(frame / 8) : 0;
     const bob = moving ? (Math.floor(frame / 8) % 2) : 0;
     drawWalker(charX, charBaseY - stagger - bob, a.color || "#7bb274", f, a.is_main);
+    // "!" mark above the head while help is recent (within 30s).
+    const t = nowServer();
+    if (a.help_at && (t - a.help_at) < 30) {
+      drawHelpMark(charX + 6, charBaseY - stagger - bob - 4);
+    }
   });
 }
 
@@ -1057,6 +1113,21 @@ function drawMailbox(x, y) {
   ctx.fillRect(x + 11, y + 3, 2, 3); // flag
   ctx.fillStyle = COLORS.mailDark;
   ctx.fillRect(x, y + 12, 12, 1);
+}
+
+// Pulsing "!" sign drawn above a postman that is calling for the user.
+function drawHelpMark(cx, topY) {
+  // Pulse: alternate two yellows by frame.
+  const flash = (frame >> 3) % 2 === 0;
+  ctx.fillStyle = flash ? "#ffd84a" : "#fff8c0";
+  // exclamation body
+  ctx.fillRect(cx - 1, topY - 8, 2, 4);
+  // dot
+  ctx.fillRect(cx - 1, topY - 2, 2, 2);
+  // outline glints
+  ctx.fillStyle = "#a0701a";
+  ctx.fillRect(cx - 2, topY - 7, 1, 2);
+  ctx.fillRect(cx + 1, topY - 7, 1, 2);
 }
 
 function drawWalker(x, y, color, frameIdx, isMain) {
