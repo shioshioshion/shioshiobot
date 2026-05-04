@@ -161,7 +161,7 @@ const PERSONALITY_VOICE = {
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.12-mission-line";
+const APP_VERSION = "0.14-slack-voice";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
@@ -210,6 +210,8 @@ function initAudioToggle() {
         { name: "テスト・遊び心", agent_id: "t-p", personality: "playful",   text: "テストー♪ どれどれ〜" },
       ];
       const pick = samples[Math.floor(Math.random() * samples.length)];
+      // Same triple as a real intro: chime first, then speech (best effort).
+      playChime(pick.personality);
       speakIntro(pick.text, pick);
     });
   }
@@ -266,6 +268,62 @@ function ensureAudio() {
   if (audioCtx && audioCtx.state === "suspended") {
     audioCtx.resume().catch(() => {});
   }
+}
+
+// Personality "leitmotifs" — short pitched chime sequences played on each
+// intro/help event. We use these as a guaranteed audio cue: the Web
+// Speech path is unreliable on Chrome / macOS (silently goes silent
+// after idle), but Web Audio always plays, and chimes give each
+// character a recognisable signature.
+const CHIME_MOTIFS = {
+  energetic: [
+    { f: 880,  d: 0.07, g: 0.28 },  // A5
+    { f: 1175, d: 0.07, g: 0.28 },  // D6
+    { f: 1480, d: 0.16, g: 0.28 },  // F#6 (resolve high)
+  ],
+  calm: [
+    { f: 659,  d: 0.20, g: 0.22 },  // E5
+    { f: 988,  d: 0.30, g: 0.18 },  // B5 (settle)
+  ],
+  shy: [
+    { f: 784,  d: 0.22, g: 0.16 },  // G5
+    { f: 988,  d: 0.20, g: 0.10 },  // B5 (gentle)
+  ],
+  playful: [
+    { f: 1175, d: 0.06, g: 0.22 },  // D6
+    { f: 988,  d: 0.06, g: 0.22 },  // B5
+    { f: 1318, d: 0.06, g: 0.22 },  // E6
+    { f: 1480, d: 0.14, g: 0.26 },  // F#6 (perky)
+  ],
+};
+
+function playChime(personality) {
+  if (!audioEnabled) return;
+  ensureAudio();
+  if (!audioCtx) return;
+  if (audioCtx.state !== "running") {
+    console.log("[agent-zoo] chime suppressed: AudioContext state =", audioCtx.state);
+    return;
+  }
+  const motif = CHIME_MOTIFS[personality] || CHIME_MOTIFS.calm;
+  const master = audioCtx.createGain();
+  master.gain.value = 0.45;
+  master.connect(audioCtx.destination);
+  let t = audioCtx.currentTime + 0.01;
+  for (const note of motif) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = "sine";
+    osc.frequency.value = note.f;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(note.g, t + 0.005);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + note.d);
+    osc.connect(gain).connect(master);
+    osc.start(t);
+    osc.stop(t + note.d + 0.05);
+    t += note.d * 0.85; // slight overlap so it feels like a phrase
+  }
+  console.log("[agent-zoo] chime for", personality);
 }
 
 // A simple sine-stack bell sound. No samples — entirely synthesised.
@@ -431,6 +489,10 @@ function maybeSpeakIntros() {
       if (cur > prev && a.intro_phrase) {
         console.log("[agent-zoo] intro detected for", a.name,
                     "prev=", prev, "cur=", cur, "phrase=", a.intro_phrase);
+        // Play the personality chime FIRST. Web Audio is reliable so
+        // this guarantees an audible cue even if speech synthesis later
+        // fails to fire. Speech is then attempted as a bonus.
+        playChime(a.personality || "calm");
         speakIntro(a.intro_phrase, a);
       }
       lastIntroAt.set(key, cur);
@@ -522,8 +584,11 @@ function maybeCallForHelp() {
       const cur = a.help_at || 0;
       if (cur > prev && a.help_phrase) {
         console.log("[agent-zoo] help requested by", a.name, "→", a.help_phrase);
-        // Bell first to draw the ear, then voice over the top.
+        // For help we layer all three cues so the user notices: a
+        // bell (urgent), then the personality chime (who's calling),
+        // then speech (what they're saying — best effort).
         playBell();
+        setTimeout(() => playChime(a.personality || "calm"), 250);
         speakIntro(a.help_phrase, a);
       }
       lastHelpAt.set(key, cur);
@@ -776,25 +841,26 @@ function drawAgentRowLabel(agent, agentIdx, speechTop) {
   ctx.fillText(agent.name + sep + missionShort, dotX + 9, rowTop + 4);
 }
 
-// Idle phrases — when nothing has happened for a while we cycle through
-// these to keep the character feeling alive. Slack microcopy vibe:
-// short, gently absurd, never frustrated.
+// Idle phrases shown when an agent has been quiet for a while. Slack
+// voice: short, calm, occasionally a tiny absurdist beat in parens
+// ("（深呼吸中）", "（道草）") — but mostly just discourse markers.
+// No exclamation marks, no anime suffixes.
 const IDLE_PHRASES = [
-  "ふむふむ…",
-  "ちょっと考えごと",
-  "もうすこし、もうすこし",
-  "ぽや〜",
-  "（道草中）",
-  "ぐつぐつ煮込んでます",
-  "ええっと、ええっと",
-  "頭のなかで整理中",
-  "（耳をすませてる）",
-  "んしょ、んしょ",
-  "（風が気持ちいい）",
-  "そろり、そろり…",
-  "ちょっとだけぼーっと",
-  "むむっ",
-  "あれ、どこだったかな",
+  "考え中…",
+  "ふーむ",
+  "うーん…",
+  "もうちょっと",
+  "ちょっと整理してます",
+  "むむ",
+  "ええっと",
+  "ふむふむ",
+  "（深呼吸中）",
+  "（道草）",
+  "（風が涼しい）",
+  "整えてます",
+  "あ、ちょっと",
+  "ぼちぼち",
+  "おっ",
 ];
 
 function speechFor(agent) {
