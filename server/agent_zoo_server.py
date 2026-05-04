@@ -341,8 +341,8 @@ _ACTION_VERBS = [
     ("確認",     ("確認", "チェック", "レビュー", "見て", "見る")),
     ("集計",     ("集計", "集約", "カウント")),
     ("比較",     ("比較", "見比べ", "対比")),
-    ("整理",     ("まとめ", "整理", "整え", "教えて", "教える", "教え",
-                  "解説", "説明")),
+    ("解説",     ("教えて", "教える", "教え", "解説", "説明", "まとめて")),
+    ("整理",     ("整理", "整え", "片付け", "まとめ")),
     ("調整",     ("大きく", "小さく", "高く", "低く", "短く", "長く",
                   "速く", "遅く", "調整", "変更", "変え", "微調整",
                   "リサイズ", "サイズ")),
@@ -379,25 +379,134 @@ def _detect_action(p):
     return None
 
 
-def slackify_mission(text):
-    """Abstract the prompt into a Slack-style "<topic>の<action>中" line.
+# Slack release-notes-style templates per action label. {} = topic.
+# Each pool has both with-topic and no-topic variants so the line still
+# reads naturally when no clean topic could be extracted.
+# Tone reference: Slack changelog ("Squashed some pesky bugs", "Slackbot
+# got a memory boost", "Made it easier to find old messages") —
+# conversational, verb-led, gentle exaggeration, sometimes asks the
+# question the work is really about ("どうする？" / "どう活かそう？").
+_ACTION_TEMPLATES = {
+    "修正": (
+        ["{}、直してます", "{}、ちょっと手当て中", "{}、なおしてます"],
+        ["気になるバグ、ちまちま退治中", "ひっかかってたとこ、直してます"],
+    ),
+    "解説": (
+        ["{}、ひも解いてます", "{}、まとめてみます", "{}を解きほぐし中"],
+        ["まとめてみます", "ひも解いてます"],
+    ),
+    "改善": (
+        ["{}、もっと良くします", "{}、ちょっと磨き中", "{}を一段アップ"],
+        ["あちこち、ちょっと磨き中"],
+    ),
+    "最適化": (
+        ["{}、めっちゃ良くします", "{}、もっとなめらかに", "{}、ぐぐっとチューニング中"],
+        ["あちこち、めっちゃ良くします"],
+    ),
+    "調整": (
+        ["{}、ちょうどよくしてます", "{}、いい感じに整え中", "{}を、いい塩梅に"],
+        ["ちょうどいい塩梅、探り中", "いい感じに整え中"],
+    ),
+    "分析": (
+        ["{}、じっくり読み解き中", "{}を見つめ中", "{}、ひも解いてます"],
+        ["数字とにらめっこ中", "じっくり読み解き中"],
+    ),
+    "調査": (
+        ["{}、ぐぐっと掘り下げ中", "{}、ちょっと調べてます", "{}、ひととおり当たってます"],
+        ["ちょっと調べてます"],
+    ),
+    "検討": (
+        ["{}、どうしよう？を考え中", "{}、頭の中でぐるぐる", "{}、悩んでます"],
+        ["どうしよう？を考え中"],
+    ),
+    "計画": (
+        ["{}、これからどうする？", "{}の道筋、引いてます", "{}の段取り、組み立て中"],
+        ["道筋、引いてます", "段取り組み中"],
+    ),
+    "設計": (
+        ["{}の下書き、引いてます", "{}、図面ひいてます"],
+        ["下書きひいてます"],
+    ),
+    "確認": (
+        ["{}、ちらっと確認", "{}、目を通してます", "{}、一周してます"],
+        ["ちらっと確認中"],
+    ),
+    "整理": (
+        ["{}、すっきりさせ中", "{}、片付け中", "{}、整え中"],
+        ["あれこれ、すっきりさせ中"],
+    ),
+    "作成": (
+        ["{}、新しく仕立て中", "{}、書き起こし中", "{}、ぴかぴかの新品で"],
+        ["新しく仕立て中", "書き起こし中"],
+    ),
+    "実装": (
+        ["{}、形にしてます", "{}、組み立て中"],
+        ["形にしてます"],
+    ),
+    "活用検討": (
+        ["{}の使い道、考え中", "{}、どう活かそうかな", "{}、活かし方を探り中"],
+        ["使い道、考え中"],
+    ),
+    "集計": (
+        ["{}、数え上げ中", "{}、ぱちぱち集計中"],
+        ["数え上げ中"],
+    ),
+    "比較": (
+        ["{}、見比べ中", "{}、横並びで比較"],
+        ["見比べ中"],
+    ),
+    "テスト": (
+        ["{}、ちゃんと動くか確認", "{}、動作チェック中"],
+        ["ちゃんと動くか確認中"],
+    ),
+    "デプロイ": (
+        ["{}、世に出します", "{}、出荷準備", "{}、本番投入中"],
+        ["出荷準備"],
+    ),
+    "ログ整理": (
+        ["{}、見返し中", "{}を遡って確認"],
+        ["ログ、見返し中"],
+    ),
+    "リファクタ": (
+        ["{}、見通しよく書き直し中", "{}、お着替え中"],
+        ["お着替え中"],
+    ),
+}
 
-    Returns None if it can't extract a meaningful (topic, action) pair —
-    in which case the caller should fall back to raw truncation.
+
+def slackify_mission(text):
+    """Abstract the prompt into a Slack-release-notes-style mission line.
+
+    Picks deterministically (by hash of topic + prompt prefix) from a
+    small template pool per detected action verb, so the same prompt
+    always produces the same mission line within a session.
     """
     if not text:
         return None
     topic = _extract_topic(text)
     action = _detect_action(text)
-    if topic and action:
-        # Avoid awkward duplicates like "テストのテスト中" when the topic
-        # noun and the action label are the same word.
-        if action in topic or topic in action:
-            return f"{action}中"
-        return f"{topic}の{action}中"
-    if action:
+    if not action:
+        return None
+
+    pools = _ACTION_TEMPLATES.get(action)
+    if not pools:
+        # Action not templated yet — fall through to bare form.
+        if topic and action not in topic and topic not in action:
+            return f"{topic}の{action}中"
         return f"{action}中"
-    return None
+
+    with_topic, no_topic = pools
+    use_pool = with_topic if (topic and action not in topic and topic not in action) else no_topic
+    if not use_pool:
+        use_pool = no_topic or with_topic
+    if not use_pool:
+        return f"{action}中"
+
+    seed = "template:" + str(topic or "") + ":" + str(text)[:80]
+    chosen = use_pool[stable_hash(seed) % len(use_pool)]
+    if "{}" in chosen and topic:
+        return chosen.format(topic)
+    return chosen
 
 
 def summarize_prompt(prompt, max_chars=34):

@@ -161,7 +161,7 @@ const PERSONALITY_VOICE = {
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.16-mission-abstraction";
+const APP_VERSION = "0.17-release-notes";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
