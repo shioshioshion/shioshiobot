@@ -295,6 +295,65 @@ def first_words(s, n=30):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+# Trailing fluff that adds politeness but no information; we strip these
+# from the lane title so the user sees the actual mission.
+_PROMPT_FLUFF = (
+    "してください", "して下さい",
+    "してくれませんか", "してもらえませんか",
+    "してくれる？", "してくれる", "してくれない？", "してくれない",
+    "してもらえる？", "してもらえる", "してもらえない？", "してもらえない",
+    "してもらえますか", "してほしい", "してね", "してくれ",
+    "教えてください", "教えて下さい",
+    "教えてくれませんか", "教えてもらえませんか",
+    "教えてくれる？", "教えてくれない？", "教えてくれない",
+    "教えてもらえる？", "教えてもらえる", "教えてほしい", "教えて",
+    "考えてください", "考えて下さい",
+    "考えてみてください", "考えてみて", "考えてほしい", "考えて",
+    "おねがいします", "お願いします", "お願いいたします", "おねがい",
+    "可能でしょうか", "できますか？", "できますか", "できる？",
+    "ですか？", "ですか", "でしょうか？", "でしょうか",
+)
+
+
+def summarize_prompt(prompt, max_chars=34):
+    """Squeeze a long user prompt into a Slack-style mission line.
+
+    Keeps the substance (the mission topic) but drops the polite
+    request-closings ("〜してください", "〜教えて", etc.), takes only the
+    first clause, and tail-truncates with an ellipsis.
+    """
+    if not prompt:
+        return ""
+    p = " ".join(str(prompt).split())
+    # Use only up to the first sentence/clause break (whichever comes
+    # first across these separators).
+    cut_candidates = []
+    for sep in ("。", "！", "？", "\n", "、", "・"):
+        i = p.find(sep)
+        if i > 0:
+            cut_candidates.append(i)
+    if cut_candidates:
+        i = min(cut_candidates)
+        # Need at least 6 characters before the break to be a useful
+        # mission line; otherwise fall through to the tail truncation.
+        if 6 < i < max_chars + 12:
+            p = p[:i]
+    # Drop trailing politeness/closings, repeatedly so chained fluff
+    # ("…してくれませんか？" → "…してくれません" → "…") all gets peeled.
+    changed = True
+    while changed:
+        changed = False
+        for f in _PROMPT_FLUFF:
+            if p.endswith(f):
+                p = p[: -len(f)]
+                changed = True
+        p = p.rstrip("、。 ?？!ー〜~ \t")
+    # Final tail truncate.
+    if len(p) > max_chars:
+        p = p[: max_chars - 1] + "…"
+    return p
+
+
 # Friendly verbs for common shell commands. The character speaks in-world
 # rather than echoing raw commands or paths. Each entry is a small pool;
 # bash_speech rotates through them so even repeated commands feel alive.
@@ -634,7 +693,7 @@ def handle_hook(payload):
 
         if evt == "UserPromptSubmit":
             full_prompt = payload.get("prompt", "") or ""
-            s["current_prompt"] = first_words(full_prompt, 40)
+            s["current_prompt"] = summarize_prompt(full_prompt, max_chars=34)
             # New round: un-end the lane, drop completed subagents, reset main.
             s["ended_at"] = None
             for k in list(s["agents"].keys()):

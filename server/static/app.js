@@ -161,7 +161,7 @@ const PERSONALITY_VOICE = {
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.11-speech-unjam";
+const APP_VERSION = "0.12-mission-line";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
@@ -702,8 +702,8 @@ function drawLane(session, yTop, lh) {
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
   const titleText = session.current_prompt
-    ? "“" + session.current_prompt + "”"
-    : "〜まちうけ中〜";
+    ? "▸ " + session.current_prompt
+    : "▸ まちうけ中…";
   ctx.fillText(clipText(titleText, W - 110), 6, yTop + 3);
 
   if (session.ended_at) {
