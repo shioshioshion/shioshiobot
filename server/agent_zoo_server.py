@@ -520,16 +520,34 @@ class Handler(BaseHTTPRequestHandler):
             ".svg":  "image/svg+xml",
             ".json": "application/json",
         }.get(ext, "application/octet-stream")
+        # ETag based on (mtime, size) — cheap to compute, changes whenever a
+        # `git pull` brings in new content. Combined with no-cache the
+        # browser always revalidates, so a fresh file shows up on plain
+        # reload (no need for cmd+shift+R).
+        st = os.stat(path)
+        etag = f'"{int(st.st_mtime * 1000):x}-{st.st_size:x}"'
+        if self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache, must-revalidate")
+            self._cors_headers()
+            self.end_headers()
+            return
         with open(path, "rb") as f:
             data = f.read()
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Cache-Control", "no-cache, must-revalidate")
         self.send_header("Pragma", "no-cache")
+        self.send_header("ETag", etag)
         self._cors_headers()
         self.end_headers()
         self.wfile.write(data)
+
+    def do_HEAD(self):
+        # Allow `curl -I` and conditional GETs to inspect headers.
+        return self.do_GET()
 
     def do_GET(self):
         u = urlparse(self.path)

@@ -86,16 +86,40 @@ const THEMES = [
   },
 ];
 
-// Theme assignment: each session keeps a stable theme for the lifetime of
-// the page, but consecutive new sessions are guaranteed to get *different*
-// themes (so 4 sessions open at once look like 4 different scenes).
-const themeAssignments = new Map(); // session_id -> theme index
-let themeCounter = 0;
+// Theme assignment: each session keeps a stable theme even across page
+// reloads (so a long-lived Claude Code session doesn't switch backgrounds
+// every time you re-open the viewer). New sessions cycle through THEMES
+// in order so that consecutive new sessions are visually distinct.
+let themeAssignments = (() => {
+  try {
+    const raw = JSON.parse(localStorage.getItem("agentZooThemes") || "{}");
+    const m = new Map();
+    for (const k of Object.keys(raw)) m.set(k, raw[k] | 0);
+    return m;
+  } catch (e) { return new Map(); }
+})();
+let themeCounter = parseInt(localStorage.getItem("agentZooThemeCounter") || "0", 10) || 0;
+
+function persistThemes() {
+  try {
+    const obj = {};
+    for (const [k, v] of themeAssignments) obj[k] = v;
+    localStorage.setItem("agentZooThemes", JSON.stringify(obj));
+    localStorage.setItem("agentZooThemeCounter", String(themeCounter));
+  } catch (e) {}
+}
+
 function pickTheme(sessionId) {
   const key = sessionId || "x";
   if (!themeAssignments.has(key)) {
     themeAssignments.set(key, themeCounter % THEMES.length);
-    themeCounter++;
+    themeCounter = (themeCounter + 1) % THEMES.length;
+    // bound the map so it doesn't grow forever
+    if (themeAssignments.size > 50) {
+      const oldest = themeAssignments.keys().next().value;
+      themeAssignments.delete(oldest);
+    }
+    persistThemes();
   }
   return THEMES[themeAssignments.get(key)];
 }
@@ -131,7 +155,7 @@ const PERSONALITY_VOICE = {
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.5-themes-voice";
+const APP_VERSION = "0.6-voice-fix";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
@@ -160,19 +184,27 @@ function initAudioToggle() {
   refreshAudioToggle();
 
   if (testBtn) {
-    // Test button: always plays a chime AND wakes the audio context.
-    // This is the recommended way to "turn sound on" since AudioContext
-    // creation requires a user gesture.
+    // Test button: rings the bell AND speaks a sample line, so the user
+    // can verify both audio paths independently. Also un-mutes if needed.
     testBtn.addEventListener("click", () => {
-      console.log("[agent-zoo] test chime requested");
+      console.log("[agent-zoo] test requested");
       if (!audioEnabled) {
-        // user clicked test while muted — un-mute so they actually hear it
         audioEnabled = true;
         localStorage.setItem("agentZooMute", "0");
         refreshAudioToggle();
       }
-      ensureAudio();
+      wakeBothAudio();
       playBell();
+      // pick one of four sample voices for the test so the user hears
+      // the personality variation on every press.
+      const samples = [
+        { name: "テスト・元気", agent_id: "t-e", personality: "energetic", text: "やってやるぞー！テストです！" },
+        { name: "テスト・落ち着き", agent_id: "t-c", personality: "calm",      text: "テストです、よろしくお願いします" },
+        { name: "テスト・控えめ", agent_id: "t-s", personality: "shy",       text: "…テスト、してみますね" },
+        { name: "テスト・遊び心", agent_id: "t-p", personality: "playful",   text: "テストー♪ どれどれ〜" },
+      ];
+      const pick = samples[Math.floor(Math.random() * samples.length)];
+      speakIntro(pick.text, pick);
     });
   }
 
@@ -185,10 +217,30 @@ function initAudioToggle() {
     });
   }
 
-  // Audio contexts can't start until a user gesture. Resume on any click.
-  const wake = () => { ensureAudio(); };
+  // Audio contexts and speechSynthesis both need a user gesture to start.
+  // Hook any click/keydown anywhere on the page to wake both.
+  const wake = () => { wakeBothAudio(); };
   window.addEventListener("click", wake);
   window.addEventListener("keydown", wake);
+}
+
+// Warm up Web Audio AND Web Speech in response to a user gesture.
+function wakeBothAudio() {
+  ensureAudio();
+  if ("speechSynthesis" in window) {
+    try {
+      // Some Chromium browsers gate speechSynthesis on a user gesture too.
+      // A near-silent utterance pinned to the queue satisfies that gate.
+      window.speechSynthesis.resume();
+      if (!window.__agentZooSpeechWarmed) {
+        const u = new SpeechSynthesisUtterance(" ");
+        u.volume = 0; u.rate = 1; u.pitch = 1;
+        u.onend = () => {};
+        window.speechSynthesis.speak(u);
+        window.__agentZooSpeechWarmed = true;
+      }
+    } catch (e) {}
+  }
 }
 
 function refreshAudioToggle() {
@@ -258,11 +310,18 @@ function playBell() {
 }
 
 function speakIntro(text, agent) {
-  if (!audioEnabled) return;
+  if (!audioEnabled) {
+    console.log("[agent-zoo] speech suppressed (muted):", text);
+    return;
+  }
   if (!("speechSynthesis" in window)) {
     console.log("[agent-zoo] speechSynthesis not supported in this browser");
     return;
   }
+  // Make sure the gesture-gate has been satisfied. If the user has not
+  // interacted with the page yet, this still won't make sound, but it
+  // primes things so the next manual click will.
+  try { window.speechSynthesis.resume(); } catch (e) {}
   const personality = agent.personality || "calm";
   const cfg = PERSONALITY_VOICE[personality] || PERSONALITY_VOICE.calm;
   const seed = stringHash((agent.name || "") + ":" + (agent.agent_id || ""));
@@ -394,7 +453,7 @@ function loop() {
 }
 
 function draw() {
-  ctx.fillStyle = COLORS.sky;
+  ctx.fillStyle = THEMES[0].sky; // fallback; each lane repaints its own band
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   drawHeader();
@@ -421,11 +480,17 @@ function drawHeader() {
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
   ctx.fillText("苔むす森のおしごと便り", 8, 9);
+  // small version stamp on the header so it is obvious whether the
+  // browser is rendering the latest app.js (vs a stale cached version).
+  ctx.font = "8px monospace";
+  ctx.fillStyle = "#a8a89c";
+  ctx.fillText(APP_VERSION, 196, 12);
 
   const t = new Date();
   const hh = String(t.getHours()).padStart(2, "0");
   const mm = String(t.getMinutes()).padStart(2, "0");
   const ss = String(t.getSeconds()).padStart(2, "0");
+  ctx.fillStyle = COLORS.bannerText;
   ctx.font = "10px monospace";
   ctx.textAlign = "right";
   ctx.fillText(`${hh}:${mm}:${ss}`, W - 8, 11);
@@ -454,10 +519,13 @@ function countActiveAgents() {
 function drawIdle(yTop) {
   const y = yTop;
   const lh = 100;
-  ctx.fillStyle = COLORS.moss1;
-  ctx.fillRect(0, y, W, lh);
-  drawMossSpeckles(y, lh);
-  drawPath(y, lh);
+  const theme = THEMES[0];
+  ctx.fillStyle = theme.sky;
+  ctx.fillRect(0, y, W, lh - GROUND_H);
+  ctx.fillStyle = theme.ground;
+  ctx.fillRect(0, y + lh - GROUND_H, W, GROUND_H);
+  drawGroundSpeckles(y + lh - GROUND_H, GROUND_H, theme);
+  drawPath(y + lh - GROUND_H, GROUND_H, theme);
   drawMailbox(W - 32, y + lh - GROUND_H);
   drawTree(40, y + lh - 36);
   drawTree(380, y + lh - 36);
@@ -470,7 +538,7 @@ function drawIdle(yTop) {
   ctx.textBaseline = "top";
   ctx.fillText("森はしずかです…", 12, y + 8);
   ctx.font = "8px monospace";
-  ctx.fillStyle = COLORS.laneTitleSub;
+  ctx.fillStyle = "#dde9c8";
   ctx.fillText("Claude Code がうごくと、ここに郵便屋さんがあらわれます。", 12, y + 22);
 }
 
