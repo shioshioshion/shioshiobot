@@ -143,19 +143,22 @@ const lastIntroAt = new Map();
 let firstFetchSeen = false;
 let audioToggleBtn = null;
 
-// Voice profile per personality (pitch / rate ranges, in Web Speech units).
-// Within each personality the agent's name+id seeds a deterministic point in
-// the range so every postman has a slightly distinct voice.
+// Voice profile per personality. All ranges are biased toward the upper
+// half of the speechSynthesis pitch scale so every postman sounds
+// small, friendly and cute — no creepy-low voices. Personalities are
+// still distinguishable through their relative pitch + rate.
+// Within each personality the agent's name+id seeds a deterministic
+// point in the range, so any one postman has a stable voice.
 const PERSONALITY_VOICE = {
-  energetic: { pitchMin: 1.20, pitchMax: 1.65, rateMin: 1.05, rateMax: 1.30 },
-  calm:      { pitchMin: 0.75, pitchMax: 1.05, rateMin: 0.85, rateMax: 1.00 },
-  shy:       { pitchMin: 0.85, pitchMax: 1.15, rateMin: 0.80, rateMax: 0.95 },
-  playful:   { pitchMin: 1.00, pitchMax: 1.50, rateMin: 0.95, rateMax: 1.25 },
+  energetic: { pitchMin: 1.45, pitchMax: 1.85, rateMin: 1.10, rateMax: 1.30, gain: 1.00 },
+  calm:      { pitchMin: 1.15, pitchMax: 1.35, rateMin: 0.95, rateMax: 1.05, gain: 0.95 },
+  shy:       { pitchMin: 1.20, pitchMax: 1.45, rateMin: 0.92, rateMax: 1.02, gain: 0.85 },
+  playful:   { pitchMin: 1.30, pitchMax: 1.70, rateMin: 1.00, rateMax: 1.25, gain: 0.98 },
 };
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.7-voice-debug";
+const APP_VERSION = "0.8-cute-voice";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
@@ -340,11 +343,15 @@ function speakIntro(text, agent) {
   utter.lang = "ja-JP";
   utter.pitch = cfg.pitchMin + r1 * (cfg.pitchMax - cfg.pitchMin);
   utter.rate  = cfg.rateMin  + r2 * (cfg.rateMax  - cfg.rateMin);
-  utter.volume = 0.95;
-  // Pick a Japanese voice if any are installed.
+  utter.volume = 0.95 * (cfg.gain || 1);
+  // Pick a Japanese voice. Prefer non-male voices: Otoya (the macOS
+  // Japanese male voice) sounds heavy and creepy at our pitch range, so
+  // we skip it whenever any other Japanese voice is available.
   const voices = ss.getVoices() || [];
   const ja = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith("ja"));
-  if (ja.length) utter.voice = ja[seed % ja.length];
+  const cute = ja.filter(v => !/otoya|male/i.test(v.name || ""));
+  const pool = cute.length ? cute : ja;
+  if (pool.length) utter.voice = pool[seed % pool.length];
   utter.onstart = () => console.log("[agent-zoo] speech START:", agent.name, "→", text);
   utter.onend   = () => console.log("[agent-zoo] speech END:  ", agent.name);
   utter.onerror = (e) => console.log("[agent-zoo] speech ERR:", e.error || e, "for", agent.name);
