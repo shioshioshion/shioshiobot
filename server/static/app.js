@@ -155,7 +155,7 @@ const PERSONALITY_VOICE = {
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.6-voice-fix";
+const APP_VERSION = "0.7-voice-debug";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
@@ -322,6 +322,15 @@ function speakIntro(text, agent) {
   // interacted with the page yet, this still won't make sound, but it
   // primes things so the next manual click will.
   try { window.speechSynthesis.resume(); } catch (e) {}
+  // Some browsers (Chrome on macOS) silently get stuck after ~15s of idle.
+  // Diagnose by reporting the queue state.
+  const ss = window.speechSynthesis;
+  console.log(
+    "[agent-zoo] speech state pre-speak: paused=", ss.paused,
+    "speaking=", ss.speaking, "pending=", ss.pending,
+    "warmed=", !!window.__agentZooSpeechWarmed,
+  );
+
   const personality = agent.personality || "calm";
   const cfg = PERSONALITY_VOICE[personality] || PERSONALITY_VOICE.calm;
   const seed = stringHash((agent.name || "") + ":" + (agent.agent_id || ""));
@@ -331,27 +340,48 @@ function speakIntro(text, agent) {
   utter.lang = "ja-JP";
   utter.pitch = cfg.pitchMin + r1 * (cfg.pitchMax - cfg.pitchMin);
   utter.rate  = cfg.rateMin  + r2 * (cfg.rateMax  - cfg.rateMin);
-  utter.volume = 0.85;
+  utter.volume = 0.95;
   // Pick a Japanese voice if any are installed.
-  const voices = window.speechSynthesis.getVoices() || [];
+  const voices = ss.getVoices() || [];
   const ja = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith("ja"));
   if (ja.length) utter.voice = ja[seed % ja.length];
-  console.log("[agent-zoo] speaking intro:", agent.name, personality,
+  utter.onstart = () => console.log("[agent-zoo] speech START:", agent.name, "→", text);
+  utter.onend   = () => console.log("[agent-zoo] speech END:  ", agent.name);
+  utter.onerror = (e) => console.log("[agent-zoo] speech ERR:", e.error || e, "for", agent.name);
+  console.log("[agent-zoo] queueing speech:", agent.name, personality,
               "p=" + utter.pitch.toFixed(2), "r=" + utter.rate.toFixed(2),
               "voice=" + (utter.voice ? utter.voice.name : "(default)"),
+              "voices_loaded=" + voices.length,
               "→", text);
-  try { window.speechSynthesis.speak(utter); }
+  // If the queue looks stuck (paused but not speaking), reset it. Without
+  // this, Chrome on macOS often goes silent after the tab has been idle.
+  if (ss.paused && !ss.speaking) {
+    try { ss.cancel(); ss.resume(); } catch (e) {}
+  }
+  try { ss.speak(utter); }
   catch (e) { console.log("[agent-zoo] speak failed:", e); }
 }
 
 function maybeSpeakIntros() {
-  if (!firstFetchSeen) return; // skip on first load (avoid a flood)
+  if (!firstFetchSeen) {
+    // first /state response — record but don't speak (avoid a flood when
+    // the page first opens with old sessions still hanging around).
+    for (const s of state.sessions) {
+      for (const a of Object.values(s.agents || {})) {
+        const key = s.session_id + ":" + a.agent_id;
+        lastIntroAt.set(key, a.intro_at || 0);
+      }
+    }
+    return;
+  }
   for (const s of state.sessions) {
     for (const a of Object.values(s.agents || {})) {
       const key = s.session_id + ":" + a.agent_id;
       const prev = lastIntroAt.get(key) || 0;
       const cur = a.intro_at || 0;
       if (cur > prev && a.intro_phrase) {
+        console.log("[agent-zoo] intro detected for", a.name,
+                    "prev=", prev, "cur=", cur, "phrase=", a.intro_phrase);
         speakIntro(a.intro_phrase, a);
       }
       lastIntroAt.set(key, cur);
@@ -368,6 +398,19 @@ function maybeSpeakIntros() {
     if (!live.has(k)) lastIntroAt.delete(k);
   }
 }
+
+// Chrome on macOS tends to silently put speechSynthesis to sleep after
+// the tab has been idle for ~15 seconds. A no-op resume() every few
+// seconds keeps it warm so the next real intro plays without delay.
+setInterval(() => {
+  if (!("speechSynthesis" in window)) return;
+  if (!audioEnabled) return;
+  if (!window.__agentZooSpeechWarmed) return;
+  const ss = window.speechSynthesis;
+  if (!ss.speaking) {
+    try { ss.resume(); } catch (e) {}
+  }
+}, 8000);
 
 function maybeRingBells() {
   // ring whenever a session's ended_at transitions to a new truthy value.
