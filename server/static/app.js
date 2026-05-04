@@ -86,8 +86,18 @@ const THEMES = [
   },
 ];
 
+// Theme assignment: each session keeps a stable theme for the lifetime of
+// the page, but consecutive new sessions are guaranteed to get *different*
+// themes (so 4 sessions open at once look like 4 different scenes).
+const themeAssignments = new Map(); // session_id -> theme index
+let themeCounter = 0;
 function pickTheme(sessionId) {
-  return THEMES[stringHash(sessionId || "x") % THEMES.length];
+  const key = sessionId || "x";
+  if (!themeAssignments.has(key)) {
+    themeAssignments.set(key, themeCounter % THEMES.length);
+    themeCounter++;
+  }
+  return THEMES[themeAssignments.get(key)];
 }
 
 let canvas, ctx;
@@ -96,7 +106,7 @@ let visuals = new Map(); // (sid:agent_id) -> { x }
 let serverNowOffset = 0;
 let frame = 0;
 
-// --- audio (鈴の音) ---
+// --- audio (鈴の音 + 意気込み読み上げ) ---
 let audioCtx = null;
 let audioEnabled = localStorage.getItem("agentZooMute") !== "1";
 // Map session_id -> last seen ended_at value. We ring whenever this value
@@ -104,16 +114,41 @@ let audioEnabled = localStorage.getItem("agentZooMute") !== "1";
 // one (multi-turn Claude Code sessions go ended → un-ended → ended → … and
 // must ring on every "ended" transition).
 const lastEndedAt = new Map();
+// Per-agent intro_at last seen. Speak when a new value arrives.
+const lastIntroAt = new Map();
 let firstFetchSeen = false;
 let audioToggleBtn = null;
 
+// Voice profile per personality (pitch / rate ranges, in Web Speech units).
+// Within each personality the agent's name+id seeds a deterministic point in
+// the range so every postman has a slightly distinct voice.
+const PERSONALITY_VOICE = {
+  energetic: { pitchMin: 1.20, pitchMax: 1.65, rateMin: 1.05, rateMax: 1.30 },
+  calm:      { pitchMin: 0.75, pitchMax: 1.05, rateMin: 0.85, rateMax: 1.00 },
+  shy:       { pitchMin: 0.85, pitchMax: 1.15, rateMin: 0.80, rateMax: 0.95 },
+  playful:   { pitchMin: 1.00, pitchMax: 1.50, rateMin: 0.95, rateMax: 1.25 },
+};
+
 window.addEventListener("load", init);
 
+const APP_VERSION = "0.5-themes-voice";
+
 function init() {
+  console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
   canvas = document.getElementById("stage");
   ctx = canvas.getContext("2d");
   ctx.imageSmoothingEnabled = false;
   initAudioToggle();
+  // The browser loads voices asynchronously; surface what's available so
+  // the user can verify Japanese voices exist if they're debugging audio.
+  if ("speechSynthesis" in window) {
+    const dump = () => {
+      const vs = (window.speechSynthesis.getVoices() || []).map(v => `${v.name}(${v.lang})`);
+      console.log("[agent-zoo] available voices:", vs.length, "→", vs.slice(0, 12).join(", "));
+    };
+    dump();
+    window.speechSynthesis.addEventListener && window.speechSynthesis.addEventListener("voiceschanged", dump);
+  }
   fetchState();
   setInterval(fetchState, 1000);
   requestAnimationFrame(loop);
@@ -222,6 +257,59 @@ function playBell() {
   }
 }
 
+function speakIntro(text, agent) {
+  if (!audioEnabled) return;
+  if (!("speechSynthesis" in window)) {
+    console.log("[agent-zoo] speechSynthesis not supported in this browser");
+    return;
+  }
+  const personality = agent.personality || "calm";
+  const cfg = PERSONALITY_VOICE[personality] || PERSONALITY_VOICE.calm;
+  const seed = stringHash((agent.name || "") + ":" + (agent.agent_id || ""));
+  const r1 = ((seed >>> 0) % 1000) / 1000;
+  const r2 = (((seed >>> 10) >>> 0) % 1000) / 1000;
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = "ja-JP";
+  utter.pitch = cfg.pitchMin + r1 * (cfg.pitchMax - cfg.pitchMin);
+  utter.rate  = cfg.rateMin  + r2 * (cfg.rateMax  - cfg.rateMin);
+  utter.volume = 0.85;
+  // Pick a Japanese voice if any are installed.
+  const voices = window.speechSynthesis.getVoices() || [];
+  const ja = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith("ja"));
+  if (ja.length) utter.voice = ja[seed % ja.length];
+  console.log("[agent-zoo] speaking intro:", agent.name, personality,
+              "p=" + utter.pitch.toFixed(2), "r=" + utter.rate.toFixed(2),
+              "voice=" + (utter.voice ? utter.voice.name : "(default)"),
+              "→", text);
+  try { window.speechSynthesis.speak(utter); }
+  catch (e) { console.log("[agent-zoo] speak failed:", e); }
+}
+
+function maybeSpeakIntros() {
+  if (!firstFetchSeen) return; // skip on first load (avoid a flood)
+  for (const s of state.sessions) {
+    for (const a of Object.values(s.agents || {})) {
+      const key = s.session_id + ":" + a.agent_id;
+      const prev = lastIntroAt.get(key) || 0;
+      const cur = a.intro_at || 0;
+      if (cur > prev && a.intro_phrase) {
+        speakIntro(a.intro_phrase, a);
+      }
+      lastIntroAt.set(key, cur);
+    }
+  }
+  // GC: forget agents that have rolled out of /state
+  const live = new Set();
+  for (const s of state.sessions) {
+    for (const a of Object.values(s.agents || {})) {
+      live.add(s.session_id + ":" + a.agent_id);
+    }
+  }
+  for (const k of Array.from(lastIntroAt.keys())) {
+    if (!live.has(k)) lastIntroAt.delete(k);
+  }
+}
+
 function maybeRingBells() {
   // ring whenever a session's ended_at transitions to a new truthy value.
   for (const s of state.sessions) {
@@ -250,6 +338,7 @@ async function fetchState() {
     const r = await fetch("/state");
     state = await r.json();
     serverNowOffset = (Date.now() / 1000) - state.now;
+    maybeSpeakIntros();
     maybeRingBells();
     resize();
   } catch (e) { /* server may briefly be down */ }
@@ -277,10 +366,11 @@ function visibleAgents(s) {
 }
 
 function laneHeight(s) {
+  // The title row IS the prompt now, so we don't reserve a separate prompt
+  // band any more.
   const agents = visibleAgents(s);
-  const promptH = s.current_prompt ? PROMPT_H : 0;
   const speechH = Math.max(1, agents.length) * ROW_H;
-  return Math.max(MIN_LANE_H, TITLE_H + promptH + speechH + GROUND_H);
+  return Math.max(MIN_LANE_H, TITLE_H + speechH + GROUND_H);
 }
 
 function resize() {
@@ -348,10 +438,8 @@ function drawFooter() {
   ctx.fillStyle = COLORS.bannerText;
   ctx.font = "9px monospace";
   ctx.textBaseline = "top";
-  ctx.fillText(`森を歩いている郵便屋さん: ${countActiveAgents()}`, 8, canvas.height - FOOTER_H + 4);
-  ctx.textAlign = "right";
-  ctx.fillText("http://127.0.0.1:7777", W - 8, canvas.height - FOOTER_H + 4);
   ctx.textAlign = "left";
+  ctx.fillText(`森を歩いている郵便屋さん: ${countActiveAgents()}`, 8, canvas.height - FOOTER_H + 4);
 }
 
 function countActiveAgents() {
@@ -402,30 +490,24 @@ function drawLane(session, yTop, lh) {
   drawPath(groundTop, GROUND_H, theme);
   drawMailbox(W - 32, groundTop);
 
-  // title row — keep dark-on-light for legibility regardless of theme
-  const cwdName = (session.cwd || "").split("/").filter(Boolean).pop() || "(no cwd)";
+  // title row: show the user's prompt directly (the cwd was always the
+  // same Mac home dir, so it carried no information for the user).
   ctx.fillStyle = COLORS.bannerBg;
   ctx.fillRect(0, yTop, W, TITLE_H);
   ctx.fillStyle = COLORS.bannerText;
   ctx.font = "bold 10px monospace";
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
-  ctx.fillText(clipText(cwdName, W - 110), 6, yTop + 3);
+  const titleText = session.current_prompt
+    ? "“" + session.current_prompt + "”"
+    : "〜まちうけ中〜";
+  ctx.fillText(clipText(titleText, W - 110), 6, yTop + 3);
 
   if (session.ended_at) {
     drawDeliveredBadge(W - 96, yTop + 2);
   }
 
-  // prompt row (truncated to fit) — text color follows theme so it stays
-  // readable on dark sky themes too
-  let speechTop = yTop + TITLE_H;
-  if (session.current_prompt) {
-    ctx.fillStyle = theme.titleDim;
-    ctx.font = "9px monospace";
-    const promptText = "“" + session.current_prompt + "”";
-    ctx.fillText(clipText(promptText, W - 12), 6, yTop + TITLE_H + 1);
-    speechTop += PROMPT_H;
-  }
+  const speechTop = yTop + TITLE_H;
 
   // characters: all walk on the same path centerline, with a small per-agent
   // y stagger so they don't overlap when bunched at start/end.

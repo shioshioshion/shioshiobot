@@ -35,6 +35,69 @@ COLOR_POOL = [
     "#8fbc8f", "#6b8e23", "#9caf88", "#b9b58c", "#c8a26d",
     "#80a26c", "#bda66e",
 ]
+PERSONALITIES = ["energetic", "calm", "shy", "playful"]
+
+# Opening lines per personality × perceived task weight.
+INTRO_PHRASES = {
+    "energetic": {
+        "heavy":  ["やってやるぞー！", "気合いれていくぞー！", "燃えてきた…！", "本気モードでいくよ！"],
+        "light":  ["まかせて！", "ぱぱっとやるよ！", "らくしょーらくしょー♪", "あっという間さ！"],
+        "normal": ["いっくよー！", "おっしゃ、いこう！", "がんばるぞー！", "やったるぞー！"],
+    },
+    "calm": {
+        "heavy":  ["丁寧に進めますね", "じっくり取り組みましょう", "ひとつずつ片付けます", "落ち着いていきます"],
+        "light":  ["お任せください", "すぐに済みますね", "了解しました", "ささっと終わらせます"],
+        "normal": ["それでは、はじめます", "おしごとですね", "承りました", "では、ぼちぼち"],
+    },
+    "shy": {
+        "heavy":  ["…がんばります", "むずかしいけど、やってみます", "せいいっぱいやります", "ちゃんと、できるかな…"],
+        "light":  ["…やってみますね", "ささっと、いけそう…です", "あ、簡単そう…", "そっと、やります"],
+        "normal": ["…おしごと、はじめます", "やってみますね…", "おてつだい、します", "よろしく…おねがいします"],
+    },
+    "playful": {
+        "heavy":  ["むずかしそうー！おもしろい！", "腕の見せどころ！", "燃えるねえ〜", "わくわくの大仕事！"],
+        "light":  ["らくしょー♪", "あっという間ー", "どれどれ〜", "おやすいご用！"],
+        "normal": ["わくわくしてきた", "なにしよかなー", "よっこらしょっと", "ふんふふん♪"],
+    },
+}
+HEAVY_KEYWORDS = (
+    "戦略", "全部", "深く", "詳しく", "詳細", "しっかり", "完璧", "徹底",
+    "計画", "分析", "調査", "包括", "高品質", "正確", "綿密", "並列",
+    "経営", "全体", "ぜんぶ", "アナリスト", "ベンチマーク", "専門家",
+    "レポート", "コンサル", "リサーチ", "監査", "セグメント", "ペルソナ",
+    "ユニットエコノミクス", "GTM", "ブランディング", "リスク",
+)
+LIGHT_KEYWORDS = (
+    "ささっと", "簡単", "教えて", "ちょっと", "確認", "見て", "ひとつ",
+    "ひとこと", "短く", "サクッ", "ぱぱっと", "サクっ",
+)
+
+
+def task_weight(prompt):
+    if not prompt:
+        return "normal"
+    p = str(prompt)
+    n = len(p)
+    if n > 180 or any(k in p for k in HEAVY_KEYWORDS):
+        return "heavy"
+    if n < 20 or any(k in p for k in LIGHT_KEYWORDS):
+        return "light"
+    return "normal"
+
+
+def personality_for(seed):
+    return PERSONALITIES[stable_hash("personality:" + str(seed)) % len(PERSONALITIES)]
+
+
+def intro_phrase_for(personality, prompt, seed=""):
+    weight = task_weight(prompt)
+    phrases = (INTRO_PHRASES.get(personality) or INTRO_PHRASES["calm"]).get(
+        weight, INTRO_PHRASES["calm"]["normal"]
+    )
+    # deterministic-by-seed pick so the same agent on the same prompt
+    # always gets the same opening line (idempotent /state).
+    idx = stable_hash("intro:" + str(seed) + ":" + str(prompt)[:80]) % len(phrases)
+    return phrases[idx]
 
 state_lock = threading.Lock()
 sessions = {}  # session_id -> dict
@@ -279,10 +342,12 @@ def ensure_agent(sid, agent_id, label=""):
         idx = len(s["agents"])
         is_main = agent_id == "main"
         mission = "とりまとめ役" if is_main else (label or "おつかい")
+        seed = sid + agent_id
         a = {
             "agent_id": agent_id,
-            "name": name_for(sid + agent_id, idx),
-            "color": color_for(sid + agent_id, idx),
+            "name": name_for(seed, idx),
+            "color": color_for(seed, idx),
+            "personality": personality_for(seed),
             "is_main": is_main,
             "progress": 0.0,
             "tool_count": 0,
@@ -294,12 +359,25 @@ def ensure_agent(sid, agent_id, label=""):
             "last_tool": None,
             "label": label,
             "mission": mission,
+            "intro_phrase": "",
+            "intro_at": 0,
             "born_at": now(),
         }
         s["agents"][agent_id] = a
     elif label and not a.get("mission"):
         a["mission"] = label
     return a
+
+
+def set_intro(agent, prompt):
+    """Stamp the agent with a personality-flavoured opening line that the
+    client should both display in the bubble and read aloud."""
+    phrase = intro_phrase_for(agent.get("personality") or "calm", prompt or "",
+                              seed=agent.get("agent_id", ""))
+    agent["intro_phrase"] = phrase
+    agent["intro_at"] = now()
+    agent["say"] = phrase
+    agent["say_until"] = now() + 8
 
 
 def latest_active_subagent(s):
@@ -326,9 +404,9 @@ def handle_hook(payload):
             sub_id = f"sub_{sub_idx}_{int(now() * 1000) % 100000}"
             label = first_words(tool_input.get("description", ""), 20)
             sub = ensure_agent(sid, sub_id, label=label)
-            sub["say"] = label or "おつかいに行ってきます！"
-            sub["say_until"] = now() + 6
-            # main also speaks
+            # subagent's intro is shaped by the description it was given
+            set_intro(sub, tool_input.get("description") or tool_input.get("prompt", ""))
+            # main also speaks (in-world summary of having delegated)
             main = s["agents"]["main"]
             main["say"] = speech_for(evt, tool_name, tool_input)
             main["say_until"] = now() + 6
@@ -349,7 +427,8 @@ def handle_hook(payload):
             return
 
         if evt == "UserPromptSubmit":
-            s["current_prompt"] = first_words(payload.get("prompt", ""), 40)
+            full_prompt = payload.get("prompt", "") or ""
+            s["current_prompt"] = first_words(full_prompt, 40)
             # New round: un-end the lane, drop completed subagents, reset main.
             s["ended_at"] = None
             for k in list(s["agents"].keys()):
@@ -361,8 +440,8 @@ def handle_hook(payload):
             main["ended"] = False
             main["ended_at"] = None
             main["active"] = True
-            main["say"] = speech_for(evt, None, None)
-            main["say_until"] = now() + 5
+            # main's intro is shaped by the full prompt (length + keywords)
+            set_intro(main, full_prompt)
             return
 
         if evt == "Stop":
