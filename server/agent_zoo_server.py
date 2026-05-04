@@ -38,26 +38,104 @@ COLOR_POOL = [
 PERSONALITIES = ["energetic", "calm", "shy", "playful"]
 
 # Opening lines per personality × perceived task weight.
+# Tone reference: Slack microcopy — short, warm, with a tiny self-aware
+# wink. Never sacrifices clarity ("I just got a job") for the joke.
 INTRO_PHRASES = {
     "energetic": {
-        "heavy":  ["やってやるぞー！", "気合いれていくぞー！", "燃えてきた…！", "本気モードでいくよ！"],
-        "light":  ["まかせて！", "ぱぱっとやるよ！", "らくしょーらくしょー♪", "あっという間さ！"],
-        "normal": ["いっくよー！", "おっしゃ、いこう！", "がんばるぞー！", "やったるぞー！"],
+        "heavy": [
+            "うわっ大物だ。腕まくりっ！",
+            "燃える系のお手紙、来ましたね！",
+            "気合い注入、完了！",
+            "ふんっ、本気モード入ります！",
+            "ずっしり…燃えてきた！",
+            "おっ骨太だ。やったろ！",
+        ],
+        "light": [
+            "ぱぱっと、ぴゅーっといきます！",
+            "おまかせを！秒で終わらせます",
+            "らくしょーらくしょー♪",
+            "ささっとやっちゃいまーす！",
+            "おちゃのこさいさい！",
+        ],
+        "normal": [
+            "おしごと、いっただきます！",
+            "やる気スイッチ、オン！",
+            "袋を背負って、いざっ",
+            "ぱかっ、出動でーす！",
+            "おまちかね、出発しまーす",
+        ],
     },
     "calm": {
-        "heavy":  ["丁寧に進めますね", "じっくり取り組みましょう", "ひとつずつ片付けます", "落ち着いていきます"],
-        "light":  ["お任せください", "すぐに済みますね", "了解しました", "ささっと終わらせます"],
-        "normal": ["それでは、はじめます", "おしごとですね", "承りました", "では、ぼちぼち"],
+        "heavy": [
+            "ふむ、これは丁寧にやらねば",
+            "深呼吸…ひとつずつ片付けます",
+            "腰を据えて参ります",
+            "じっくり進めましょう",
+            "おお、しっかりめのお仕事ですね",
+            "では、慎重に",
+        ],
+        "light": [
+            "はい、お任せください",
+            "では、さらりと",
+            "わかりました、すぐに",
+            "了解です、お安いご用で",
+            "ふむ、それくらいなら",
+        ],
+        "normal": [
+            "では、はじめましょうか",
+            "ぼちぼち取り掛かります",
+            "なるほど、こういう感じですね",
+            "ふむふむ、了解です",
+            "おしごと、お預かりしますね",
+        ],
     },
     "shy": {
-        "heavy":  ["…がんばります", "むずかしいけど、やってみます", "せいいっぱいやります", "ちゃんと、できるかな…"],
-        "light":  ["…やってみますね", "ささっと、いけそう…です", "あ、簡単そう…", "そっと、やります"],
-        "normal": ["…おしごと、はじめます", "やってみますね…", "おてつだい、します", "よろしく…おねがいします"],
+        "heavy": [
+            "うっ、これは大きい…でも、やります",
+            "あの、むずかしそうですが、がんばります",
+            "せ、せいいっぱい…やります",
+            "ど、どきどき…でもやります",
+            "正直ちょっと心配ですが、はい…",
+            "ふぅ…深呼吸して、いきます",
+        ],
+        "light": [
+            "あ、これなら…たぶん大丈夫です",
+            "そっと、やってみますね",
+            "あの、すぐに済ませます…",
+            "は、はい、やります…",
+            "た、たぶんすぐです",
+        ],
+        "normal": [
+            "あ、はい、やってみます…",
+            "そろり、そろり…",
+            "おてつだい、します…",
+            "が、がんばります…",
+            "よろしく…おねがいします",
+        ],
     },
     "playful": {
-        "heavy":  ["むずかしそうー！おもしろい！", "腕の見せどころ！", "燃えるねえ〜", "わくわくの大仕事！"],
-        "light":  ["らくしょー♪", "あっという間ー", "どれどれ〜", "おやすいご用！"],
-        "normal": ["わくわくしてきた", "なにしよかなー", "よっこらしょっと", "ふんふふん♪"],
+        "heavy": [
+            "おっと、これは骨があるね〜",
+            "ふふ、燃えてきた！",
+            "むずかしそう…たのしい！",
+            "やりがいセンサー、反応ちゅう",
+            "わくわくの大物だっ",
+            "ぐっと押し上げる感じで！",
+        ],
+        "light": [
+            "らくしょーらくしょー♪",
+            "ふんふん、ちょちょいのちょい",
+            "あっという間にいっちゃいまーす",
+            "おやすいご用で〜",
+            "へへ、まかせて♪",
+        ],
+        "normal": [
+            "ふむふむ、なにしようかな〜",
+            "わくわくしてきた",
+            "んっしょっと、出発♪",
+            "ふんふふん♪",
+            "おやおや、おしごとですか〜",
+        ],
     },
 }
 HEAVY_KEYWORDS = (
@@ -104,32 +182,77 @@ def intro_phrase_for(personality, prompt, seed=""):
 # (waiting for user input / approval / answer). Personality-flavoured
 # so the same character speaks consistently — and so the user can learn
 # to recognise "this is so-and-so calling for me".
+# Help-call lines: Slack-style — clear about needing attention, but
+# warm and a little self-aware. Never demanding.
 HELP_PHRASES = {
     "energetic": [
         "ご主人さま、ちょっと来てー！",
-        "おーい！見てほしい！",
-        "判断おねがいしますっ！",
-        "こっち来てー！助けてー！",
+        "おーい！判断タイムですよっ",
+        "ぴこーん！出番でーす",
+        "ちょっとちょっと、止まっちゃった！",
+        "ヘルプ要請、出します！",
+        "あ、ここ、まずいやつだ。来てー",
     ],
     "calm": [
         "あの、ご相談があります",
-        "ご確認、いただけますか",
         "お時間よろしいですか？",
-        "判断をおねがいします",
+        "ご確認をお願いできますか",
+        "ちょっと、お知恵を拝借…",
+        "判断、おまちしてます",
+        "迷子になりかけてます",
     ],
     "shy": [
-        "あの…ちょっと、ご相談…",
-        "おねがい、できますか…",
-        "ご主人さま…来てください…",
-        "た、助けてください…",
+        "あの…ちょっとだけ、お時間…",
+        "あ、あの…来ていただけますか…",
+        "おねがい、できますか…？",
+        "た、立ち止まっちゃいました…",
+        "ご、ご相談です…",
+        "ちょっと、こわくて…進めません",
     ],
     "playful": [
-        "ねえねえー！こっちこっちー！",
-        "ご主人さま、出番ですよー♪",
-        "ちょっとちょっと、相談ー！",
-        "ヘルプーっ！来てー！",
+        "ねえねえー！見て見てー！",
+        "ピンポーン♪ 出番ですよー",
+        "ふふ、止まっちゃった。たすけて〜",
+        "ヘルプー！ヘルプー！",
+        "ちょっとちょっと、こっちこっち♪",
+        "袋詰めで困ってまーす",
     ],
 }
+
+# Final-bell lines on Stop, again per personality. Replaces the old
+# single "ぶじ届けました…!" so deliveries feel more in-character.
+DELIVERED_PHRASES = {
+    "energetic": [
+        "とどけたー！ふぅっ！",
+        "完了でーす！おつかれっ",
+        "やった、ぜんぶ届いた！",
+        "ぱかっ、終了！",
+    ],
+    "calm": [
+        "お届け完了です",
+        "ぶじ、届けました",
+        "おしごと、おわりました",
+        "今日はこの辺で",
+    ],
+    "shy": [
+        "あの、ぶじに届けました…",
+        "おわりました…ふぅ",
+        "なんとか、いけました…",
+        "おつかれさまでした…",
+    ],
+    "playful": [
+        "ぴゅーっと配達完了♪",
+        "ふふ、おしまい！",
+        "とどいたよっ",
+        "おしまい〜、おしまい〜",
+    ],
+}
+
+
+def delivered_phrase_for(personality, seed=""):
+    pool = DELIVERED_PHRASES.get(personality) or DELIVERED_PHRASES["calm"]
+    idx = stable_hash("delivered:" + str(seed) + ":" + str(now())) % len(pool)
+    return pool[idx]
 
 
 def help_phrase_for(personality, seed=""):
@@ -173,88 +296,106 @@ def first_words(s, n=30):
 
 
 # Friendly verbs for common shell commands. The character speaks in-world
-# rather than echoing raw commands or paths.
+# rather than echoing raw commands or paths. Each entry is a small pool;
+# bash_speech rotates through them so even repeated commands feel alive.
 BASH_VERBS = {
-    "mkdir": "おうちをこしらえる",
-    "rmdir": "古いおうちをかたづける",
-    "cd":    "べつの場所へひととび",
-    "ls":    "あたりをきょろきょろ",
-    "pwd":   "いまどこかな…",
-    "cat":   "中身をちらりとのぞく",
-    "less":  "中身をちらりとのぞく",
-    "head":  "先頭をそっとのぞく",
-    "tail":  "末尾をそっとのぞく",
-    "rm":    "そっとおかたづけ",
-    "mv":    "荷物を運びなおす",
-    "cp":    "写しをこしらえる",
-    "touch": "あたらしい紙を一枚",
-    "echo":  "ひとりごとをつぶやく",
-    "git":   "巻物に記録する",
-    "gh":    "遠い森へ便りを出す",
-    "npm":   "道具袋を整える",
-    "yarn":  "道具袋を整える",
-    "pnpm":  "道具袋を整える",
-    "pip":   "道具袋を整える",
-    "pip3":  "道具袋を整える",
-    "uv":    "道具袋を整える",
-    "brew":  "道具袋を整える",
-    "python":  "まじないを唱える",
-    "python3": "まじないを唱える",
-    "node":  "まじないを唱える",
-    "deno":  "まじないを唱える",
-    "bun":   "まじないを唱える",
-    "go":    "まじないを唱える",
-    "cargo": "まじないを唱える",
-    "make":  "ふいごを動かす",
-    "curl":  "かぜのうわさをきく",
-    "wget":  "かぜのうわさをきく",
-    "find":  "森のなかをさがす",
-    "grep":  "あしあとを追う",
-    "rg":    "あしあとを追う",
-    "ag":    "あしあとを追う",
-    "sed":   "文字をなおす",
-    "awk":   "文字をなおす",
-    "sort":  "ならべかえる",
-    "uniq":  "重なりをとる",
-    "wc":    "かずをかぞえる",
-    "diff":  "ちがいをくらべる",
-    "tar":   "包みをむすぶ",
-    "zip":   "包みをむすぶ",
-    "unzip": "包みをほどく",
-    "docker":  "おおきな箱を動かす",
-    "kubectl": "箱の群れを動かす",
-    "open":  "とびらを開く",
-    "test":  "ためしてみる",
-    "pytest":   "ためしてみる",
-    "jest":     "ためしてみる",
-    "vitest":   "ためしてみる",
-    "tsc":      "巻物を仕立てなおす",
-    "eslint":   "言葉づかいを直す",
-    "prettier": "うつくしく整える",
-    "ruff":     "うつくしく整える",
-    "ssh":   "遠くの森へひととび",
-    "rsync": "荷物をきれいに運ぶ",
-    "scp":   "荷物を遠くへ運ぶ",
-    "launchctl": "見えない使い魔を動かす",
-    "killall":   "そっと幕を引く",
-    "kill":      "そっと幕を引く",
-    "ps":     "森のみんなの様子をみる",
-    "top":    "森のみんなの様子をみる",
-    "htop":   "森のみんなの様子をみる",
-    "sleep":  "ひとやすみ…",
+    "mkdir": ["おうちをこしらえる", "新しい部屋を建てる"],
+    "rmdir": ["古いおうちをかたづける"],
+    "cd":    ["べつの場所へひととび", "場面転換、っと"],
+    "ls":    ["あたりをきょろきょろ", "なにがあるかな…"],
+    "pwd":   ["いまどこかな…"],
+    "cat":   ["中身をちらりとのぞく", "ぱっと開いて読む"],
+    "less":  ["中身をちらりとのぞく"],
+    "head":  ["先頭をそっとのぞく"],
+    "tail":  ["末尾をそっとのぞく", "おしりだけ見る"],
+    "rm":    ["そっとおかたづけ", "ぽいっと処分"],
+    "mv":    ["荷物を運びなおす", "おひっこし中"],
+    "cp":    ["写しをこしらえる", "コピーをぺたり"],
+    "touch": ["あたらしい紙を一枚"],
+    "echo":  ["ひとりごとをつぶやく"],
+    "git":   ["巻物に記録する", "歴史に刻む", "ログにこっそり"],
+    "gh":    ["遠い森へ便りを出す"],
+    "npm":   ["道具袋を整える", "依存関係を整頓"],
+    "yarn":  ["道具袋を整える"],
+    "pnpm":  ["道具袋を整える"],
+    "pip":   ["道具袋を整える"],
+    "pip3":  ["道具袋を整える"],
+    "uv":    ["道具袋を整える"],
+    "brew":  ["道具袋を整える"],
+    "python":  ["まじないを唱える", "ぱいそんを呼ぶ"],
+    "python3": ["まじないを唱える", "ぱいそんを呼ぶ"],
+    "node":  ["まじないを唱える"],
+    "deno":  ["まじないを唱える"],
+    "bun":   ["まじないを唱える"],
+    "go":    ["まじないを唱える"],
+    "cargo": ["まじないを唱える"],
+    "make":  ["ふいごを動かす", "工房に火を入れる"],
+    "curl":  ["かぜのうわさをきく", "ぴゅーっと取りに行く"],
+    "wget":  ["かぜのうわさをきく"],
+    "find":  ["森のなかをさがす"],
+    "grep":  ["あしあとを追う"],
+    "rg":    ["あしあとを追う"],
+    "ag":    ["あしあとを追う"],
+    "sed":   ["文字をなおす"],
+    "awk":   ["文字をなおす"],
+    "sort":  ["ならべかえる"],
+    "uniq":  ["重なりをとる"],
+    "wc":    ["かずをかぞえる"],
+    "diff":  ["ちがいをくらべる", "間違いさがし"],
+    "tar":   ["包みをむすぶ"],
+    "zip":   ["包みをむすぶ"],
+    "unzip": ["包みをほどく"],
+    "docker":  ["おおきな箱を動かす"],
+    "kubectl": ["箱の群れを動かす"],
+    "open":  ["とびらを開く"],
+    "test":  ["ためしてみる", "そろそろ通るかな…"],
+    "pytest":   ["ためしてみる", "そろそろ通るかな…"],
+    "jest":     ["ためしてみる"],
+    "vitest":   ["ためしてみる"],
+    "tsc":      ["巻物を仕立てなおす"],
+    "eslint":   ["言葉づかいを直す"],
+    "prettier": ["うつくしく整える"],
+    "ruff":     ["うつくしく整える"],
+    "ssh":   ["遠くの森へひととび"],
+    "rsync": ["荷物をきれいに運ぶ"],
+    "scp":   ["荷物を遠くへ運ぶ"],
+    "launchctl": ["見えない使い魔を動かす"],
+    "killall":   ["そっと幕を引く"],
+    "kill":      ["そっと幕を引く"],
+    "ps":     ["森のみんなの様子をみる"],
+    "top":    ["森のみんなの様子をみる"],
+    "htop":   ["森のみんなの様子をみる"],
+    "sleep":  ["ひとやすみ…", "ちょっと一服"],
 }
+
+UNKNOWN_BASH = [
+    "おまじないをひとつ唱えた",
+    "なにかぶつぶつ言ってる",
+    "杖をふってみた",
+]
+
+
+def _pick_pool(pool, seed):
+    if not pool:
+        return ""
+    return pool[stable_hash(seed) % len(pool)]
 
 
 def bash_speech(cmd):
     if not cmd:
-        return "おまじないをひとつ唱えた"
+        return _pick_pool(UNKNOWN_BASH, str(cmd) + str(now()))
     parts = str(cmd).strip().split()
     if not parts:
-        return "おまじないをひとつ唱えた"
+        return _pick_pool(UNKNOWN_BASH, str(cmd) + str(now()))
     name = parts[0].rsplit("/", 1)[-1]
     if name == "sudo" and len(parts) > 1:
         name = parts[1].rsplit("/", 1)[-1]
-    return BASH_VERBS.get(name, "おまじないをひとつ唱えた")
+    pool = BASH_VERBS.get(name)
+    if not pool:
+        return _pick_pool(UNKNOWN_BASH, str(cmd) + str(now()))
+    # Rotate by command-string + timestamp so the same command from
+    # different agents gets different flavor.
+    return _pick_pool(pool, str(cmd) + str(now()))
 
 
 def keyword_from_pattern(s):
@@ -271,27 +412,40 @@ def keyword_from_pattern(s):
     return first_words(s, 12)
 
 
+READ_PHRASES   = ["「{}」のページをめくる", "「{}」をぱらり", "「{}」をのぞき見", "「{}」をじっくり"]
+WRITE_PHRASES  = ["「{}」へお手紙を書く", "「{}」をしたためる", "「{}」をぴかぴかの新品で"]
+EDIT_PHRASES   = ["「{}」をちょこっと書きなおし", "「{}」に手を入れる", "「{}」を手直し中"]
+MULTI_PHRASES  = ["「{}」を何箇所かまとめて直す", "「{}」のあちこちを修繕"]
+WEBFETCH_PHRASES = ["かぜのうわさをきく…", "森の外まで便りを取りに", "ふぁっと風に乗せて取り寄せ"]
+SUBSTOP_PHRASES = ["おつかい完了です！", "おかえりなさい、ぶじでした", "ふぅ、終わりましたー"]
+
+
 def speech_for(event_name, tool_name, tool_input):
     ti = tool_input or {}
     if event_name == "UserPromptSubmit":
         return "あたらしい手紙が届いた！"
     if event_name == "Stop":
+        # Per-personality phrase is set by handle_hook; this is a fallback.
         return "ぶじ届けました…!"
     if event_name == "SessionStart":
         return "今日もおしごとはじめます"
     if event_name == "Notification":
         return "むむ、なにか呼ばれてる…"
     if event_name == "SubagentStop":
-        return "おつかい完了です！"
+        return _pick_pool(SUBSTOP_PHRASES, "substop:" + str(now()))
     if event_name in ("PreToolUse", "PostToolUse"):
         if tool_name == "Read":
-            return f"「{short_path(ti.get('file_path',''))}」のページをめくる…"
+            name = short_path(ti.get("file_path", ""))
+            return _pick_pool(READ_PHRASES, "read:" + name + str(now())).format(name)
         if tool_name == "Write":
-            return f"「{short_path(ti.get('file_path',''))}」へお手紙を書いてる"
+            name = short_path(ti.get("file_path", ""))
+            return _pick_pool(WRITE_PHRASES, "write:" + name + str(now())).format(name)
         if tool_name == "Edit":
-            return f"「{short_path(ti.get('file_path',''))}」をちょこっと書きなおし"
+            name = short_path(ti.get("file_path", ""))
+            return _pick_pool(EDIT_PHRASES, "edit:" + name + str(now())).format(name)
         if tool_name == "MultiEdit":
-            return f"「{short_path(ti.get('file_path',''))}」を何箇所か直す"
+            name = short_path(ti.get("file_path", ""))
+            return _pick_pool(MULTI_PHRASES, "multi:" + name + str(now())).format(name)
         if tool_name == "Bash":
             return bash_speech(ti.get("command", ""))
         if tool_name == "Grep":
@@ -299,7 +453,7 @@ def speech_for(event_name, tool_name, tool_input):
         if tool_name == "Glob":
             return f"「{keyword_from_pattern(ti.get('pattern',''))}」のキノコを探す"
         if tool_name == "WebFetch":
-            return "かぜのうわさをきく…"
+            return _pick_pool(WEBFETCH_PHRASES, "webfetch:" + str(now()))
         if tool_name in ("WebSearch", "web_search"):
             q = first_words(ti.get("query", ""), 14)
             return f"「{q}」を森の外でしらべる…" if q else "もりの外をしらべる…"
@@ -504,8 +658,11 @@ def handle_hook(payload):
                     a["ended"] = True
                     a["active"] = False
                     a["ended_at"] = now()
-                    a["say"] = speech_for("Stop", None, None)
-                    a["say_until"] = now() + 8
+                    a["say"] = delivered_phrase_for(
+                        a.get("personality") or "calm",
+                        seed=a.get("agent_id", ""),
+                    )
+                    a["say_until"] = now() + 10
             return
 
         if evt == "SessionStart":

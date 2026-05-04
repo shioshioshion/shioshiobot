@@ -161,7 +161,7 @@ const PERSONALITY_VOICE = {
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.9-help-call";
+const APP_VERSION = "0.10-slack-tone";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
@@ -742,11 +742,25 @@ function drawAgentRowLabel(agent, agentIdx, speechTop) {
   ctx.fillText(agent.name + sep + missionShort, dotX + 9, rowTop + 4);
 }
 
-// Idle phrases shown when an agent has been quiet for a while. Rotates so
-// the character feels alive even when no new tools are firing.
+// Idle phrases — when nothing has happened for a while we cycle through
+// these to keep the character feeling alive. Slack microcopy vibe:
+// short, gently absurd, never frustrated.
 const IDLE_PHRASES = [
-  "ふむふむ…", "もうすこし…", "考えごと中…", "むむ…",
-  "じっくりと…", "そろそろかな…", "うーん…", "ぽやぽや",
+  "ふむふむ…",
+  "ちょっと考えごと",
+  "もうすこし、もうすこし",
+  "ぽや〜",
+  "（道草中）",
+  "ぐつぐつ煮込んでます",
+  "ええっと、ええっと",
+  "頭のなかで整理中",
+  "（耳をすませてる）",
+  "んしょ、んしょ",
+  "（風が気持ちいい）",
+  "そろり、そろり…",
+  "ちょっとだけぼーっと",
+  "むむっ",
+  "あれ、どこだったかな",
 ];
 
 function speechFor(agent) {
