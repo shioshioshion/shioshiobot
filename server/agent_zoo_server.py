@@ -302,32 +302,118 @@ _PROMPT_FLUFF = (
 
 
 _MD_LINK_RE = __import__("re").compile(r"\[([^\]]+)\]\([^)]+\)")
+_re = __import__("re")
+
+# Topic-extraction patterns (lazy, anchored at start of the cleaned prompt).
+# Tries to grab the noun phrase before a typical Japanese topic particle.
+_TOPIC_PATTERNS = [
+    _re.compile(r"^(.{2,25}?)について"),
+    _re.compile(r"^(.{2,25}?)を"),
+    _re.compile(r"^(.{2,25}?)は"),
+    _re.compile(r"^(.{2,25}?)が"),
+]
+
+# Leading deictic / filler phrases that we strip off the topic so a
+# request like "このように文字サイズは…" yields topic = "文字サイズ"
+# rather than "このように文字サイズ".
+_LEADING_DEIXIS = (
+    "このように", "そのように", "あのように", "そういえば",
+    "ちなみに", "まず", "まずは", "とりあえず", "ぜひ", "ちょっと",
+    "今の", "次の", "この", "その", "あの",
+)
+
+# Verb-stem keywords → the abstract action label we display. The order
+# matters: the first list whose keyword appears in the prompt wins.
+_ACTION_VERBS = [
+    ("活用検討", ("活用", "使い方", "使い道")),
+    ("実装",     ("実装",)),
+    ("修正",     ("直し", "直す", "直して", "修正", "修繕", "fix", "FIX")),
+    ("改善",     ("改善", "改良", "良くす", "良くして", "ブラッシュアップ")),
+    ("最適化",   ("最適化", "最適", "チューニング")),
+    ("リファクタ", ("リファクタ", "整理しなお")),
+    ("作成",     ("作って", "作る", "作成", "新規作成", "書いて", "書く",
+                  "起こ", "立ち上げ", "セットアップ")),
+    ("分析",     ("分析", "解析")),
+    ("調査",     ("調べ", "調査", "リサーチ")),
+    ("検討",     ("検討", "考えて", "考える", "考え", "プランニング")),
+    ("計画",     ("計画", "ロードマップ", "スケジュール")),
+    ("設計",     ("設計",)),
+    ("確認",     ("確認", "チェック", "レビュー", "見て", "見る")),
+    ("集計",     ("集計", "集約", "カウント")),
+    ("比較",     ("比較", "見比べ", "対比")),
+    ("整理",     ("まとめ", "整理", "整え", "教えて", "教える", "教え",
+                  "解説", "説明")),
+    ("調整",     ("大きく", "小さく", "高く", "低く", "短く", "長く",
+                  "速く", "遅く", "調整", "変更", "変え", "微調整",
+                  "リサイズ", "サイズ")),
+    ("削除",     ("削除", "消して", "消す", "消し", "片付け")),
+    ("ログ整理", ("ログ", "履歴")),
+    ("テスト",   ("テスト", "test", "TEST")),
+    ("デプロイ", ("デプロイ", "リリース", "公開")),
+]
+
+
+def _extract_topic(p):
+    for pat in _TOPIC_PATTERNS:
+        m = pat.match(p)
+        if m:
+            t = m.group(1).strip()
+            # Strip leading deixis (repeatedly so chains peel)
+            changed = True
+            while changed:
+                changed = False
+                for d in _LEADING_DEIXIS:
+                    if t.startswith(d):
+                        t = t[len(d):]
+                        changed = True
+            if 2 <= len(t) <= 22:
+                return t
+    return None
+
+
+def _detect_action(p):
+    for status, kws in _ACTION_VERBS:
+        for kw in kws:
+            if kw in p:
+                return status
+    return None
+
+
+def slackify_mission(text):
+    """Abstract the prompt into a Slack-style "<topic>の<action>中" line.
+
+    Returns None if it can't extract a meaningful (topic, action) pair —
+    in which case the caller should fall back to raw truncation.
+    """
+    if not text:
+        return None
+    topic = _extract_topic(text)
+    action = _detect_action(text)
+    if topic and action:
+        # Avoid awkward duplicates like "テストのテスト中" when the topic
+        # noun and the action label are the same word.
+        if action in topic or topic in action:
+            return f"{action}中"
+        return f"{topic}の{action}中"
+    if action:
+        return f"{action}中"
+    return None
 
 
 def summarize_prompt(prompt, max_chars=34):
     """Squeeze a long user prompt into a Slack-style mission line.
 
-    Goal: keep BOTH ends visible so the user can see the topic AND the
-    action verb at the same glance ("topic … verb"). Avoids the previous
-    bug where splitting at the first 「、」 dropped the actual request,
-    leaving only the problem statement.
-
-    Steps:
-      1. Strip Markdown auto-links (`[name](url)` → `name`).
-      2. Take only the first FULL SENTENCE if there is one (split at
-         。！？\n only — not 「、」, since that's still mid-sentence).
-      3. Repeatedly peel trailing politeness ("〜してください",
-         "〜教えてくれませんか", etc.).
-      4. If still too long, middle-truncate so the topic at the start
-         and the verb at the end both stay visible.
+    First tries an abstract "<topic>の<action>中" rewrite ("Slack-y").
+    Falls back to a keep-both-ends middle-truncation if no clear pattern
+    is detected (so terminal output and other free-form text still
+    appears, just trimmed).
     """
     if not prompt:
         return ""
     p = " ".join(str(prompt).split())
     p = _MD_LINK_RE.sub(r"\1", p)
 
-    # Step 2 — sentence-level break (NOT 「、」, since that's still
-    # inside one sentence; cutting there would drop the request verb).
+    # Sentence-level break only (NOT 「、」 — it's still mid-sentence).
     cut_candidates = []
     for sep in ("。", "！", "？", "\n"):
         i = p.find(sep)
@@ -335,12 +421,16 @@ def summarize_prompt(prompt, max_chars=34):
             cut_candidates.append(i)
     if cut_candidates:
         i = min(cut_candidates)
-        # Need at least 6 chars before the break for it to be a useful
-        # mission line; otherwise fall through.
-        if 6 < i < max_chars + 24:
+        if 6 < i < 240:
             p = p[:i]
 
-    # Step 3 — repeatedly peel trailing politeness.
+    # Step A — try the abstract Slack-style rewrite.
+    slacky = slackify_mission(p)
+    if slacky and len(slacky) <= max_chars:
+        return slacky
+
+    # Step B — fallback: peel politeness, then middle-truncate so both
+    # the topic at the start and the verb at the end remain visible.
     changed = True
     while changed:
         changed = False
@@ -350,8 +440,6 @@ def summarize_prompt(prompt, max_chars=34):
                 changed = True
         p = p.rstrip("、。 ?？!ー〜~ \t")
 
-    # Step 4 — if still too long, middle-truncate so both the topic
-    # (start) and the action verb (end) remain visible.
     if len(p) > max_chars:
         half = (max_chars - 1) // 2
         p = p[:half] + "…" + p[-(max_chars - half - 1):]
