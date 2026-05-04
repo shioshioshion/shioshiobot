@@ -161,7 +161,7 @@ const PERSONALITY_VOICE = {
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.10-slack-tone";
+const APP_VERSION = "0.11-speech-unjam";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
@@ -315,28 +315,7 @@ function playBell() {
   }
 }
 
-function speakIntro(text, agent) {
-  if (!audioEnabled) {
-    console.log("[agent-zoo] speech suppressed (muted):", text);
-    return;
-  }
-  if (!("speechSynthesis" in window)) {
-    console.log("[agent-zoo] speechSynthesis not supported in this browser");
-    return;
-  }
-  // Make sure the gesture-gate has been satisfied. If the user has not
-  // interacted with the page yet, this still won't make sound, but it
-  // primes things so the next manual click will.
-  try { window.speechSynthesis.resume(); } catch (e) {}
-  // Some browsers (Chrome on macOS) silently get stuck after ~15s of idle.
-  // Diagnose by reporting the queue state.
-  const ss = window.speechSynthesis;
-  console.log(
-    "[agent-zoo] speech state pre-speak: paused=", ss.paused,
-    "speaking=", ss.speaking, "pending=", ss.pending,
-    "warmed=", !!window.__agentZooSpeechWarmed,
-  );
-
+function _buildUtter(text, agent) {
   const personality = agent.personality || "calm";
   const cfg = PERSONALITY_VOICE[personality] || PERSONALITY_VOICE.calm;
   const seed = stringHash((agent.name || "") + ":" + (agent.agent_id || ""));
@@ -346,30 +325,90 @@ function speakIntro(text, agent) {
   utter.lang = "ja-JP";
   utter.pitch = cfg.pitchMin + r1 * (cfg.pitchMax - cfg.pitchMin);
   utter.rate  = cfg.rateMin  + r2 * (cfg.rateMax  - cfg.rateMin);
-  utter.volume = 0.95 * (cfg.gain || 1);
-  // Pick a Japanese voice. Prefer non-male voices: Otoya (the macOS
-  // Japanese male voice) sounds heavy and creepy at our pitch range, so
-  // we skip it whenever any other Japanese voice is available.
-  const voices = ss.getVoices() || [];
+  utter.volume = Math.min(1, 0.95 * (cfg.gain || 1));
+  const voices = window.speechSynthesis.getVoices() || [];
   const ja = voices.filter(v => v.lang && v.lang.toLowerCase().startsWith("ja"));
-  const cute = ja.filter(v => !/otoya|male/i.test(v.name || ""));
+  const cute = ja.filter(v => !/otoya/i.test(v.name || ""));
   const pool = cute.length ? cute : ja;
   if (pool.length) utter.voice = pool[seed % pool.length];
+  return { utter, personality, voicesLoaded: voices.length };
+}
+
+function speakIntro(text, agent) {
+  if (!audioEnabled) {
+    console.log("[agent-zoo] speech suppressed (muted):", text);
+    return;
+  }
+  if (!("speechSynthesis" in window)) {
+    console.log("[agent-zoo] speechSynthesis not supported in this browser");
+    return;
+  }
+  const ss = window.speechSynthesis;
+  console.log(
+    "[agent-zoo] speech state pre-speak: paused=", ss.paused,
+    "speaking=", ss.speaking, "pending=", ss.pending,
+  );
+
+  // Aggressive un-jam: if the engine is "idle" but somehow stuck (Chrome
+  // on macOS often gets into this state after ~15s without speaking),
+  // a cancel() + resume() is the only thing that revives it. We only
+  // cancel when there's nothing actually in flight, so we don't kill a
+  // legitimate ongoing utterance.
+  try {
+    if (!ss.speaking && !ss.pending) {
+      ss.cancel();
+    }
+    ss.resume();
+  } catch (e) { console.log("[agent-zoo] reset failed:", e); }
+
+  const built = _buildUtter(text, agent);
+  const utter = built.utter;
   utter.onstart = () => console.log("[agent-zoo] speech START:", agent.name, "→", text);
   utter.onend   = () => console.log("[agent-zoo] speech END:  ", agent.name);
-  utter.onerror = (e) => console.log("[agent-zoo] speech ERR:", e.error || e, "for", agent.name);
-  console.log("[agent-zoo] queueing speech:", agent.name, personality,
+  utter.onerror = (e) => {
+    console.log("[agent-zoo] speech ERR:", e.error || e, "for", agent.name);
+    // One-shot retry on transient errors. Build a fresh utterance because
+    // a SpeechSynthesisUtterance can only be spoken once reliably.
+    if (e.error === "interrupted" || e.error === "canceled") return;
+    if (utter.__retried) return;
+    setTimeout(() => {
+      try {
+        const again = _buildUtter(text, agent).utter;
+        again.__retried = true;
+        again.onstart = () => console.log("[agent-zoo] retry START:", agent.name);
+        again.onend   = () => console.log("[agent-zoo] retry END:  ", agent.name);
+        again.onerror = (er) => console.log("[agent-zoo] retry ERR:", er.error, agent.name);
+        ss.cancel(); ss.resume(); ss.speak(again);
+      } catch (e2) { console.log("[agent-zoo] retry failed:", e2); }
+    }, 200);
+  };
+
+  console.log("[agent-zoo] queueing speech:", agent.name, built.personality,
               "p=" + utter.pitch.toFixed(2), "r=" + utter.rate.toFixed(2),
               "voice=" + (utter.voice ? utter.voice.name : "(default)"),
-              "voices_loaded=" + voices.length,
+              "voices_loaded=" + built.voicesLoaded,
               "→", text);
-  // If the queue looks stuck (paused but not speaking), reset it. Without
-  // this, Chrome on macOS often goes silent after the tab has been idle.
-  if (ss.paused && !ss.speaking) {
-    try { ss.cancel(); ss.resume(); } catch (e) {}
-  }
   try { ss.speak(utter); }
   catch (e) { console.log("[agent-zoo] speak failed:", e); }
+
+  // Watchdog: if the utterance never starts within 1 second, force a
+  // recovery cycle and try once more with a fresh utterance.
+  let started = false;
+  utter.addEventListener("start", () => { started = true; });
+  setTimeout(() => {
+    if (started) return;
+    if (utter.__retried) return;
+    console.log("[agent-zoo] speech didn't start within 1s; recovering");
+    try { ss.cancel(); ss.resume(); } catch (e) {}
+    try {
+      const again = _buildUtter(text, agent).utter;
+      again.__retried = true;
+      again.onstart = () => console.log("[agent-zoo] recovery START:", agent.name);
+      again.onend   = () => console.log("[agent-zoo] recovery END:  ", agent.name);
+      again.onerror = (er) => console.log("[agent-zoo] recovery ERR:", er.error, agent.name);
+      ss.speak(again);
+    } catch (e) { console.log("[agent-zoo] recovery failed:", e); }
+  }, 1100);
 }
 
 function maybeSpeakIntros() {
@@ -409,31 +448,26 @@ function maybeSpeakIntros() {
   }
 }
 
-// Chrome on macOS silently puts the audio stack to sleep after ~15s of
-// inactivity. Plain `resume()` is not enough — the only reliable cure is
-// to push a near-silent utterance through speechSynthesis on a steady
-// cadence so the engine never reaches the sleep state. We also keep the
-// Web Audio context resumed in the same loop, since it suffers the same
-// suspension at the OS level.
+// Lightweight keep-alive that just resumes audio engines every few
+// seconds. Earlier versions pumped a silent utterance through Web Speech
+// to keep it warm, but on Chrome / macOS that silent utterance can leave
+// `speaking=true` set forever, jamming all subsequent real speech. We
+// now do recovery on-demand inside speakIntro instead.
+let __keepAliveTicks = 0;
 setInterval(() => {
-  // Web Audio: revive a suspended AudioContext.
+  __keepAliveTicks++;
   if (audioCtx && audioCtx.state === "suspended") {
     try { audioCtx.resume(); } catch (e) {}
   }
-  // Web Speech: keep the engine alive even when the user is muted —
-  // a silent utterance is inaudible and avoids the sleep that would
-  // make the FIRST real intro after un-muting come out silent.
   if (!("speechSynthesis" in window)) return;
   const ss = window.speechSynthesis;
-  if (ss.speaking || ss.pending) return; // mid-utterance, leave it alone
-  try {
-    ss.resume();
-    const u = new SpeechSynthesisUtterance(" ");
-    u.volume = 0;
-    u.rate = 1.5;
-    ss.speak(u);
-  } catch (e) {}
-}, 10000);
+  try { ss.resume(); } catch (e) {}
+  if (__keepAliveTicks % 6 === 0) {
+    // every ~30s: report state so we can spot a wedged engine.
+    console.log("[agent-zoo] keep-alive #" + __keepAliveTicks,
+                "paused=", ss.paused, "speaking=", ss.speaking, "pending=", ss.pending);
+  }
+}, 5000);
 
 function maybeRingBells() {
   // ring whenever a session's ended_at transitions to a new truthy value.
