@@ -161,7 +161,7 @@ const PERSONALITY_VOICE = {
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.17-release-notes";
+const APP_VERSION = "0.18-ogran-slack";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
@@ -841,26 +841,24 @@ function drawAgentRowLabel(agent, agentIdx, speechTop) {
   ctx.fillText(agent.name + sep + missionShort, dotX + 9, rowTop + 4);
 }
 
-// Idle phrases shown when an agent has been quiet for a while. Slack
-// voice: short, calm, occasionally a tiny absurdist beat in parens
-// ("（深呼吸中）", "（道草）") — but mostly just discourse markers.
-// No exclamation marks, no anime suffixes.
+// Idle phrases — Slack release-notes vibe: tiny self-deprecating
+// asides, parenthetical small theatre, never demanding.
 const IDLE_PHRASES = [
   "考え中…",
   "ふーむ",
   "うーん…",
   "もうちょっと",
-  "ちょっと整理してます",
-  "むむ",
-  "ええっと",
-  "ふむふむ",
-  "（深呼吸中）",
-  "（道草）",
+  "頭の中で交通整理",
+  "ちょっと水分補給",
+  "アイデア降ってこないかな",
+  "（深呼吸）",
+  "（道草中）",
+  "（小休止）",
+  "ぐぬぬ",
+  "ええっと、ええっと",
+  "あれ、どこだったかな",
   "（風が涼しい）",
-  "整えてます",
-  "あ、ちょっと",
   "ぼちぼち",
-  "おっ",
 ];
 
 function speechFor(agent) {
