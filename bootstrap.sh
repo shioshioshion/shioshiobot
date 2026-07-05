@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 苔むす森のおしごと便り — one-shot bootstrap.
+# とここと 経営ダッシュボード — one-shot bootstrap.
 #
 # Designed to be run as:
 #   curl -fsSL https://raw.githubusercontent.com/shioshioshion/shioshiobot/claude/agent-progress-game-cXGzB/bootstrap.sh | bash

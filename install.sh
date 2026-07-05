@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 苔むす森のおしごと便り — installer for macOS.
+# とここと 経営ダッシュボード — installer for macOS.
 #
 # Usage:
 #   ./install.sh
@@ -73,7 +73,7 @@ cat <<EOF
     ~/.claude-agent-zoo/server.log
     ~/.claude-agent-zoo/server.err.log
 
-  To also see Claude.ai chats (browser) in the森:
+  To also see Claude.ai chats (browser) in the dashboard:
     1. Open Chrome / Brave / Edge / Arc
     2. Visit  chrome://extensions
     3. Toggle "Developer mode" (top right)

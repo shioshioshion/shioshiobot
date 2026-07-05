@@ -1,4 +1,4 @@
-// 苔むす森のおしごと便り — content script for claude.ai
+// とここと 経営ダッシュボード — content script for claude.ai
 // Watches for user prompts and assistant streaming activity, then forwards
 // events to the agent-zoo background relay (which POSTs to localhost:7777).
 

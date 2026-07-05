@@ -1,13 +1,14 @@
-// 苔むす森のおしごと便り — Canvas visualisation of Claude Code agent activity.
+// とここと 経営ダッシュボード — Canvas visualisation of Claude Code agent activity.
+// 米沢みさわ小学校（廃校リノベの宿）を舞台に、生徒（転校生）が校舎の中を歩いて
+// ゴール（黒板・下駄箱・校門…）へ向かう。世界観は米沢織（紅花×藍）＋校舎＋山里。
 //
 // Layout per session (lane):
 //   ┌──────────────────────────────────────────────┐
-//   │ cwd-name                       おとどけずみ ♥ │  title (16px)
-//   │ "prompt summary…"                            │  prompt (14px, only if any)
+//   │ ▸ mission summary            ていしゅつ完了 ♥ │  title (16px)
 //   │ ▓ bubble row for agent 0                     │  speech zone:
 //   │ ▓ bubble row for agent 1                     │   one row (26px) per agent
 //   │ ▓ …                                          │   bubble border = agent body color
-//   │ moss + path with characters + postbox        │  ground (38px)
+//   │ floor + path with 生徒 + goal(黒板/下駄箱…)  │  ground (38px)
 //   └──────────────────────────────────────────────┘
 //
 // Lane height is dynamic: it grows downward as more agents appear so
@@ -24,65 +25,83 @@ const ROW_H = 26;
 const GROUND_H = 38;
 const MIN_LANE_H = TITLE_H + ROW_H + GROUND_H;
 
+// とここと palette — 米沢織の染め（紅花＝safflower / 藍＝indigo）＋生成り＋木＋黒板。
 const COLORS = {
-  bubble: "#fdfdf2",
-  bubbleBorder: "#3b3a2a",
-  text: "#262320",
-  bannerBg: "#3b3a2a",
-  bannerText: "#fdfdf2",
-  // shared sprite colors (postman & mailbox stay the same across themes)
-  mailRed: "#bf4a3a",
-  mailDark: "#5e2620",
-  mailBeige: "#f4e9c8",
-  // legacy aliases retained for unchanged sprites:
-  mushroomCap: "#c8473e",
-  mushroomCapDot: "#f4e9c8",
-  mushroomStem: "#f4e9c8",
+  bubble: "#f6efd9",       // 生成り — speech bubbles / text on dark
+  bubbleBorder: "#26384f", // 藍 — bubble & panel borders
+  text: "#2a2620",
+  bannerBg: "#26384f",     // 藍 chrome — header / footer / title bars
+  bannerText: "#f6efd9",   // 生成り
+  // accent (紅花・safflower) — main cap, delivered badge, help "!", flags
+  accent: "#d95f2b",
+  accentLight: "#f0a35a",
+  accentDark: "#a5401b",
+  cream: "#f6efd9",
+  // school/village sprite tones
+  wood: "#b98a52",
+  woodDark: "#7c5330",
+  board: "#3a5245",        // 黒板 green
+  chalk: "#f2efe2",
+  mountain: "#6d8a7a",
+  mountainDark: "#4f6b5c",
+  // legacy aliases still referenced by shared sprites (trees/leaves)
   trunk: "#6b4a2b",
   leaves: "#5b8c4a",
   leavesShade: "#3a6b3f",
   fernGreen: "#3a6b3f",
+  // legacy mail* aliases kept pointing at the accent so any stray
+  // reference stays on-palette during the transition.
+  mailRed: "#d95f2b",
+  mailDark: "#a5401b",
+  mailBeige: "#f6efd9",
 };
 
-// Each session is assigned one theme (deterministic by session_id) so the
-// scenery varies but stays stable across reloads. The postman, the path
-// and the mailbox are shared so every theme reads as "an おしごと郵便屋さん".
+// Each session is assigned one scene (deterministic by session_id) so the
+// scenery varies but stays stable across reloads. The 生徒 (schoolkid) walker
+// and the path are shared so every scene reads as "とここと・米沢みさわ小学校".
+// theme[0] = 教室 is the home/default scene (used as fallback elsewhere).
 const THEMES = [
-  { // 0: 苔の森
-    sky: "#cde6c8", ground: "#5d8a5e", groundDark: "#446b48", groundDot: "#6da26d",
-    pathBase: "#7d8c5b", pathStone: "#9da973",
-    titleDim: "#dde9c8",
-    decor: ["mushroom", "fern", "tree", "smallMushroom"],
+  { // 0: 教室（きょうしつ） — home
+    sky: "#eadfc4", ground: "#b98a52", groundDark: "#7c5330", groundDot: "#cda469",
+    pathBase: "#c89a5e", pathStone: "#dcb679",
+    titleDim: "#f0e6cf",
+    decor: ["desk", "window", "chalkTray", "desk"],
+    goal: "board",
   },
-  { // 1: 砂浜の道
-    sky: "#bce0f0", ground: "#e0c894", groundDark: "#bea870", groundDot: "#f0d8a4",
-    pathBase: "#e8c890", pathStone: "#f5dba8",
-    titleDim: "#cce6f0",
-    decor: ["palm", "shell", "smallStone", "smallMushroom"],
+  { // 1: 校庭（放課後）
+    sky: "#f4c79a", ground: "#c2a066", groundDark: "#9a7c48", groundDot: "#d8b878",
+    pathBase: "#caa96e", pathStone: "#e0c48c",
+    titleDim: "#f6dcc0",
+    decor: ["mountains", "ironBar", "jungleGym", "cherryTree"],
+    goal: "gate",
   },
-  { // 2: 夜の集落
-    sky: "#1f2349", ground: "#2a2e54", groundDark: "#161938", groundDot: "#5a6090",
-    pathBase: "#3d3b58", pathStone: "#5a5878",
-    titleDim: "#a8b0d8",
-    decor: ["lantern", "nightTree", "firefly", "star"],
+  { // 2: 廊下（ろうか）
+    sky: "#d8c9a8", ground: "#a5763f", groundDark: "#6f4e29", groundDot: "#c0925a",
+    pathBase: "#b5854a", pathStone: "#cfa066",
+    titleDim: "#e6dabc",
+    decor: ["shoeLocker", "locker", "window", "locker"],
+    goal: "shoeLocker",
   },
-  { // 3: 雪の道
-    sky: "#dde8f0", ground: "#dee5e8", groundDark: "#a6b6c0", groundDot: "#ffffff",
-    pathBase: "#9eafbf", pathStone: "#dde8f0",
-    titleDim: "#dde8f0",
-    decor: ["pine", "snowMound", "snowflake", "smallStone"],
+  { // 3: 焚き火の夜（たきび）
+    sky: "#1a2340", ground: "#33402f", groundDark: "#212c1e", groundDot: "#556a45",
+    pathBase: "#3d4a34", pathStone: "#5a6a48",
+    titleDim: "#b8c0a0",
+    decor: ["campfire", "logs", "tent", "grill"],
+    goal: "tent",
   },
-  { // 4: 桜並木
-    sky: "#fae3ec", ground: "#a4c094", groundDark: "#7c987a", groundDot: "#e8b8d0",
-    pathBase: "#c8b090", pathStone: "#e0c4a4",
-    titleDim: "#f0c8de",
-    decor: ["cherryTree", "lantern", "fern", "smallMushroom"],
-  },
-  { // 5: 星空小径
-    sky: "#0e1238", ground: "#1d2255", groundDark: "#0d1130", groundDot: "#7884c4",
-    pathBase: "#3a4078", pathStone: "#6068a0",
+  { // 4: 星空観察（ほしぞら）
+    sky: "#0d1330", ground: "#20304a", groundDark: "#131d30", groundDot: "#4a6088",
+    pathBase: "#2c3d5a", pathStone: "#465e82",
     titleDim: "#bcc8f0",
-    decor: ["star", "firefly", "lantern", "nightTree"],
+    decor: ["star", "mountains", "star", "milkyway"],
+    goal: "telescope",
+  },
+  { // 5: 織りの間（米沢織）
+    sky: "#e8dcc0", ground: "#8a9c78", groundDark: "#5f6f50", groundDot: "#a4b48c",
+    pathBase: "#b09a6a", pathStone: "#c8b184",
+    titleDim: "#efe6cf",
+    decor: ["clothRoll", "indigoVat", "spool", "clothRoll"],
+    goal: "loom",
   },
 ];
 
@@ -161,7 +180,7 @@ const PERSONALITY_VOICE = {
 
 window.addEventListener("load", init);
 
-const APP_VERSION = "0.18-ogran-slack";
+const APP_VERSION = "1.0-tokokoto";
 
 function init() {
   console.log("[agent-zoo] app.js loaded, version =", APP_VERSION);
@@ -679,12 +698,14 @@ function drawHeader() {
   ctx.font = "bold 12px monospace";
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
-  ctx.fillText("苔むす森のおしごと便り", 8, 9);
-  // small version stamp on the header so it is obvious whether the
-  // browser is rendering the latest app.js (vs a stale cached version).
+  ctx.fillText("とここと 経営ダッシュボード", 8, 5);
+  // subtitle + small version stamp on the header so it is obvious whether
+  // the browser is rendering the latest app.js (vs a stale cached version).
   ctx.font = "8px monospace";
-  ctx.fillStyle = "#a8a89c";
-  ctx.fillText(APP_VERSION, 196, 12);
+  ctx.fillStyle = COLORS.accentLight;
+  ctx.fillText("米沢みさわ小学校", 8, 19);
+  ctx.fillStyle = "#8fa0b8";
+  ctx.fillText(APP_VERSION, 196, 19);
 
   const t = new Date();
   const hh = String(t.getHours()).padStart(2, "0");
@@ -704,7 +725,7 @@ function drawFooter() {
   ctx.font = "9px monospace";
   ctx.textBaseline = "top";
   ctx.textAlign = "left";
-  ctx.fillText(`森を歩いている郵便屋さん: ${countActiveAgents()}`, 8, canvas.height - FOOTER_H + 4);
+  ctx.fillText(`登校中の生徒: ${countActiveAgents()}`, 8, canvas.height - FOOTER_H + 4);
 }
 
 function countActiveAgents() {
@@ -726,20 +747,19 @@ function drawIdle(yTop) {
   ctx.fillRect(0, y + lh - GROUND_H, W, GROUND_H);
   drawGroundSpeckles(y + lh - GROUND_H, GROUND_H, theme);
   drawPath(y + lh - GROUND_H, GROUND_H, theme);
-  drawMailbox(W - 32, y + lh - GROUND_H);
-  drawTree(40, y + lh - 36);
-  drawTree(380, y + lh - 36);
-  drawMushroom(120, y + lh - 18);
-  drawFern(220, y + lh - 14);
-  drawMushroom(310, y + lh - 18);
+  drawGoal(W - 32, y + lh - GROUND_H, theme);
+  drawWindow(44, y + lh - 30);
+  drawDesk(120, y + lh - 18);
+  drawChalkTray(230, y + lh - 12);
+  drawDesk(320, y + lh - 18);
 
   ctx.fillStyle = COLORS.bannerText;
   ctx.font = "10px monospace";
   ctx.textBaseline = "top";
-  ctx.fillText("森はしずかです…", 12, y + 8);
+  ctx.fillText("校舎はしずかです…", 12, y + 8);
   ctx.font = "8px monospace";
-  ctx.fillStyle = "#dde9c8";
-  ctx.fillText("Claude Code がうごくと、ここに郵便屋さんがあらわれます。", 12, y + 22);
+  ctx.fillStyle = COLORS.accentLight;
+  ctx.fillText("Claude Code がうごくと、生徒が登校してきます。", 12, y + 22);
 }
 
 function drawLane(session, yTop, lh) {
@@ -756,7 +776,7 @@ function drawLane(session, yTop, lh) {
   drawGroundSpeckles(groundTop, GROUND_H, theme);
   drawDecor(session, groundTop, theme);
   drawPath(groundTop, GROUND_H, theme);
-  drawMailbox(W - 32, groundTop);
+  drawGoal(W - 32, groundTop, theme);
 
   // title row: show the user's prompt directly (the cwd was always the
   // same Mac home dir, so it carried no information for the user).
@@ -918,11 +938,11 @@ function drawBubbleForAgent(agent, agentIdx, speechTop, anchorX) {
 
 function drawDeliveredBadge(x, y) {
   ctx.font = "bold 9px monospace";
-  const label = "おとどけずみ ♥";
+  const label = "ていしゅつ完了 ♥";
   const w = Math.ceil(ctx.measureText(label).width) + 8;
-  ctx.fillStyle = COLORS.mailRed;
+  ctx.fillStyle = COLORS.accent;
   ctx.fillRect(x - (w - 84), y, w, 12);
-  ctx.fillStyle = COLORS.bannerText;
+  ctx.fillStyle = COLORS.cream;
   ctx.textBaseline = "top";
   ctx.fillText(label, x - (w - 84) + 4, y + 1);
 }
@@ -986,22 +1006,44 @@ function mulberry32(a) {
 // Each entry takes (x, baseY) where baseY is roughly the top of the path
 // band; the function offsets upward to plant itself on/near the ground.
 const DECOR_FNS = {
-  mushroom:      (x, b) => drawMushroom(x, b - 8),
-  smallMushroom: (x, b) => drawSmallMushroom(x, b - 6),
-  fern:          (x, b) => drawFern(x, b - 4),
-  tree:          (x, b) => drawTree(x, b - 28),
-  palm:          (x, b) => drawPalm(x, b - 26),
-  shell:         (x, b) => drawShell(x, b - 4),
-  smallStone:    (x, b) => drawSmallStone(x, b - 4),
-  lantern:       (x, b) => drawLantern(x, b - 22),
-  nightTree:     (x, b) => drawNightTree(x, b - 26),
-  firefly:       (x, b) => drawFirefly(x, b - 16),
-  star:          (x, b) => drawStar(x, b - 18),
-  pine:          (x, b) => drawPine(x, b - 26),
-  snowMound:     (x, b) => drawSnowMound(x, b - 6),
-  snowflake:     (x, b) => drawSnowflake(x, b - 18),
-  cherryTree:    (x, b) => drawCherryTree(x, b - 28),
+  // 教室
+  desk:       (x, b) => drawDesk(x, b - 10),
+  window:     (x, b) => drawWindow(x, b - 22),
+  chalkTray:  (x, b) => drawChalkTray(x, b - 4),
+  // 校庭
+  mountains:  (x, b) => drawMountains(x, b - 16),
+  ironBar:    (x, b) => drawIronBar(x, b - 16),
+  jungleGym:  (x, b) => drawJungleGym(x, b - 16),
+  cherryTree: (x, b) => drawCherryTree(x, b - 28),
+  // 廊下
+  shoeLocker: (x, b) => drawShoeLocker(x, b - 18),
+  locker:     (x, b) => drawLocker(x, b - 22),
+  // 焚き火の夜
+  campfire:   (x, b) => drawCampfire(x, b - 12),
+  logs:       (x, b) => drawLogs(x, b - 4),
+  tent:       (x, b) => drawTent(x, b - 14),
+  grill:      (x, b) => drawGrill(x, b - 10),
+  // 星空
+  star:       (x, b) => drawStar(x, b - 18),
+  milkyway:   (x, b) => drawMilkyway(x, b - 20),
+  // 織りの間
+  clothRoll:  (x, b) => drawClothRoll(x, b - 8),
+  indigoVat:  (x, b) => drawIndigoVat(x, b - 8),
+  spool:      (x, b) => drawSpool(x, b - 6),
 };
+
+// Goal sprite (end of the path) per scene — the place the 生徒 arrives.
+function drawGoal(x, y, theme) {
+  switch (theme.goal) {
+    case "board":      return drawBoard(x - 4, y);
+    case "gate":       return drawGate(x, y);
+    case "shoeLocker": return drawShoeLockerGoal(x, y);
+    case "tent":       return drawTentGoal(x, y);
+    case "telescope":  return drawTelescope(x, y);
+    case "loom":       return drawLoom(x, y);
+    default:           return drawBoard(x - 4, y);
+  }
+}
 
 function drawDecor(session, groundTop, theme) {
   const seed = stringHash(session.session_id || "x");
@@ -1017,32 +1059,7 @@ function drawDecor(session, groundTop, theme) {
   }
 }
 
-function drawMushroom(x, y) {
-  ctx.fillStyle = COLORS.mushroomStem;
-  ctx.fillRect(x + 2, y + 3, 3, 5);
-  ctx.fillStyle = COLORS.mushroomCap;
-  ctx.fillRect(x, y, 7, 3);
-  ctx.fillRect(x + 1, y - 1, 5, 1);
-  ctx.fillStyle = COLORS.mushroomCapDot;
-  ctx.fillRect(x + 2, y + 1, 1, 1);
-  ctx.fillRect(x + 4, y, 1, 1);
-}
-
-function drawSmallMushroom(x, y) {
-  ctx.fillStyle = COLORS.mushroomStem;
-  ctx.fillRect(x + 1, y + 2, 2, 3);
-  ctx.fillStyle = "#e29960";
-  ctx.fillRect(x, y, 4, 2);
-}
-
-function drawFern(x, y) {
-  ctx.fillStyle = COLORS.fernGreen;
-  for (let i = 0; i < 5; i++) {
-    ctx.fillRect(x - i, y + i, 2, 1);
-    ctx.fillRect(x + i + 1, y + i, 2, 1);
-  }
-  ctx.fillRect(x, y - 1, 1, 7);
-}
+// ---- reused sprites ----
 
 function drawTree(x, y) {
   ctx.fillStyle = COLORS.trunk;
@@ -1057,84 +1074,31 @@ function drawTree(x, y) {
   ctx.fillRect(x + 5, y + 11, 2, 2);
 }
 
-// --- new sprites for varied themes ---
-
-function drawPalm(x, y) {
-  // bent trunk
-  ctx.fillStyle = "#7a5a32";
-  ctx.fillRect(x + 4, y + 12, 2, 12);
-  ctx.fillRect(x + 5, y + 8, 2, 4);
-  ctx.fillRect(x + 6, y + 6, 2, 2);
-  // fronds
-  ctx.fillStyle = "#4a8b58";
-  ctx.fillRect(x, y + 4, 5, 1);
-  ctx.fillRect(x - 1, y + 5, 4, 1);
-  ctx.fillRect(x + 7, y + 4, 5, 1);
-  ctx.fillRect(x + 9, y + 5, 4, 1);
-  ctx.fillRect(x + 1, y + 2, 4, 2);
-  ctx.fillRect(x + 7, y + 2, 4, 2);
-  ctx.fillRect(x + 4, y, 5, 2);
-  // coconuts
-  ctx.fillStyle = "#3a2a1a";
-  ctx.fillRect(x + 5, y + 5, 1, 1);
-  ctx.fillRect(x + 7, y + 6, 1, 1);
-}
-
-function drawShell(x, y) {
-  ctx.fillStyle = "#f0c4d4";
-  ctx.fillRect(x + 1, y + 1, 5, 1);
-  ctx.fillRect(x, y + 2, 7, 2);
-  ctx.fillStyle = "#c89aae";
-  ctx.fillRect(x + 1, y + 2, 1, 1);
-  ctx.fillRect(x + 3, y + 1, 1, 2);
-  ctx.fillRect(x + 5, y + 2, 1, 1);
-  ctx.fillStyle = "#a07088";
-  ctx.fillRect(x + 1, y + 4, 5, 1);
-}
-
-function drawSmallStone(x, y) {
-  ctx.fillStyle = "#9b958a";
-  ctx.fillRect(x, y + 1, 5, 2);
-  ctx.fillRect(x + 1, y, 3, 1);
-  ctx.fillStyle = "#776f64";
-  ctx.fillRect(x, y + 3, 5, 1);
-  ctx.fillStyle = "#bcb6ab";
-  ctx.fillRect(x + 1, y + 1, 1, 1);
-}
-
-function drawLantern(x, y) {
-  // post
-  ctx.fillStyle = "#3b2a1c";
-  ctx.fillRect(x + 4, y + 8, 2, 14);
-  // lantern body
-  ctx.fillStyle = "#a04a2a";
-  ctx.fillRect(x + 1, y + 2, 8, 6);
-  ctx.fillStyle = "#3b2a1c";
-  ctx.fillRect(x, y + 1, 10, 1);
-  ctx.fillRect(x, y + 8, 10, 1);
-  // glow
-  ctx.fillStyle = "#f6e08a";
-  ctx.fillRect(x + 3, y + 4, 4, 2);
-  // tiny halo dots (only readable on dark themes, harmless on light)
-  ctx.fillStyle = "#f6e08a";
-  ctx.fillRect(x - 1, y + 4, 1, 1);
-  ctx.fillRect(x + 10, y + 4, 1, 1);
-}
-
-function drawNightTree(x, y) {
-  ctx.fillStyle = "#4a3a26";
+function drawCherryTree(x, y) {
+  ctx.fillStyle = "#6b4a2b";
   ctx.fillRect(x + 4, y + 14, 3, 10);
-  ctx.fillStyle = "#2c5a3a";
-  ctx.fillRect(x, y + 6, 11, 9);
-  ctx.fillRect(x + 1, y + 4, 9, 2);
-  ctx.fillRect(x + 3, y + 2, 5, 2);
-  ctx.fillStyle = "#1a3a2a";
-  ctx.fillRect(x + 2, y + 10, 2, 2);
-  ctx.fillRect(x + 7, y + 8, 2, 2);
+  ctx.fillStyle = "#f0a8c4";
+  ctx.fillRect(x, y + 4, 11, 9);
+  ctx.fillRect(x + 1, y + 2, 9, 2);
+  ctx.fillRect(x + 3, y, 5, 2);
+  ctx.fillStyle = "#d088a8";
+  ctx.fillRect(x + 1, y + 9, 2, 2);
+  ctx.fillRect(x + 7, y + 6, 2, 2);
+  ctx.fillStyle = "#f8c4d8";
+  ctx.fillRect(x + 5, y + 12, 1, 1);
+  ctx.fillRect(x + 2, y + 13, 1, 1);
+}
+
+function drawStar(x, y) {
+  const tw = (frame >> 4) % 3;
+  ctx.fillStyle = tw === 0 ? "#fdfdf2" : "#e6ecff";
+  ctx.fillRect(x + 1, y, 1, 3);
+  ctx.fillRect(x, y + 1, 3, 1);
+  ctx.fillStyle = "#a8b0d8";
+  ctx.fillRect(x + 1, y + 3, 1, 1);
 }
 
 function drawFirefly(x, y) {
-  // small floating light
   const flick = (frame >> 3) % 2;
   ctx.fillStyle = flick ? "#f6e08a" : "#fff8c0";
   ctx.fillRect(x + 1, y + 1, 2, 2);
@@ -1145,86 +1109,292 @@ function drawFirefly(x, y) {
   ctx.fillRect(x + 3, y + 3, 1, 1);
 }
 
-function drawStar(x, y) {
+// ---- とここと decor sprites ----
+
+// 教室: 学習机
+function drawDesk(x, y) {
+  ctx.fillStyle = COLORS.woodDark;
+  ctx.fillRect(x + 1, y + 6, 2, 6);
+  ctx.fillRect(x + 8, y + 6, 2, 6);
+  ctx.fillStyle = COLORS.wood;
+  ctx.fillRect(x, y + 4, 11, 3);
+  ctx.fillStyle = "#e8e0c8";
+  ctx.fillRect(x + 3, y + 2, 5, 2); // notebook on top
+  ctx.fillStyle = COLORS.accent;
+  ctx.fillRect(x + 3, y + 2, 5, 1);
+}
+
+// 教室/廊下: 窓（山の見える）
+function drawWindow(x, y) {
+  ctx.fillStyle = COLORS.woodDark;
+  ctx.fillRect(x, y, 16, 18);
+  ctx.fillStyle = "#bcd8e4";
+  ctx.fillRect(x + 2, y + 2, 12, 14);
+  ctx.fillStyle = COLORS.mountain;
+  ctx.fillRect(x + 2, y + 10, 12, 6);
+  ctx.fillStyle = COLORS.mountainDark;
+  ctx.fillRect(x + 6, y + 8, 5, 2);
+  ctx.fillStyle = COLORS.woodDark;
+  ctx.fillRect(x + 8, y + 2, 1, 14);
+  ctx.fillRect(x + 2, y + 8, 12, 1);
+}
+
+// 教室: チョーク受け
+function drawChalkTray(x, y) {
+  ctx.fillStyle = COLORS.woodDark;
+  ctx.fillRect(x, y + 2, 10, 2);
+  ctx.fillStyle = COLORS.chalk;
+  ctx.fillRect(x + 1, y + 1, 3, 1);
+  ctx.fillStyle = COLORS.accentLight;
+  ctx.fillRect(x + 6, y + 1, 3, 1);
+}
+
+// 校庭/星空: 米沢の山並み
+function drawMountains(x, y) {
+  ctx.fillStyle = COLORS.mountain;
+  ctx.fillRect(x, y + 8, 24, 8);
+  ctx.fillRect(x + 3, y + 5, 8, 3);
+  ctx.fillRect(x + 13, y + 4, 8, 4);
+  ctx.fillStyle = COLORS.mountainDark;
+  ctx.fillRect(x + 5, y + 3, 3, 2);
+  ctx.fillRect(x + 15, y + 2, 3, 2);
+  ctx.fillStyle = "#eef4f0";
+  ctx.fillRect(x + 6, y + 3, 1, 1);
+  ctx.fillRect(x + 16, y + 2, 1, 1);
+}
+
+// 校庭: 鉄棒
+function drawIronBar(x, y) {
+  ctx.fillStyle = "#9aa2a8";
+  ctx.fillRect(x, y + 2, 2, 14);
+  ctx.fillRect(x + 12, y + 2, 2, 14);
+  ctx.fillRect(x, y + 2, 14, 2);
+  ctx.fillStyle = "#c4ccd0";
+  ctx.fillRect(x + 1, y + 2, 12, 1);
+}
+
+// 校庭: ジャングルジム
+function drawJungleGym(x, y) {
+  ctx.fillStyle = "#5a9bb0";
+  for (let i = 0; i <= 12; i += 6) ctx.fillRect(x + i, y, 1, 16);
+  for (let j = 0; j <= 16; j += 5) ctx.fillRect(x, y + j, 13, 1);
+}
+
+// 廊下: 下駄箱（小・装飾）
+function drawShoeLocker(x, y) {
+  ctx.fillStyle = COLORS.wood;
+  ctx.fillRect(x, y, 14, 18);
+  ctx.fillStyle = COLORS.woodDark;
+  for (let j = 0; j <= 18; j += 6) ctx.fillRect(x, y + j, 14, 1);
+  for (let i = 0; i <= 14; i += 7) ctx.fillRect(x + i, y, 1, 18);
+}
+
+// 廊下: ロッカー
+function drawLocker(x, y) {
+  ctx.fillStyle = "#8a9aa0";
+  ctx.fillRect(x, y, 8, 22);
+  ctx.fillStyle = "#6c7c82";
+  ctx.fillRect(x, y, 8, 1);
+  ctx.fillRect(x, y + 11, 8, 1);
+  ctx.fillStyle = "#3a4448";
+  ctx.fillRect(x + 6, y + 4, 1, 2);
+  ctx.fillRect(x + 6, y + 15, 1, 2);
+}
+
+// 焚き火の夜: 焚き火（アニメ）
+function drawCampfire(x, y) {
+  ctx.fillStyle = COLORS.woodDark;
+  ctx.fillRect(x, y + 8, 12, 3);
+  ctx.fillRect(x + 1, y + 10, 10, 2);
+  const t = (frame >> 2) % 2;
+  ctx.fillStyle = "#e0662f";
+  ctx.fillRect(x + 3, y + 2, 6, 7);
+  ctx.fillStyle = "#f0a35a";
+  ctx.fillRect(x + 4, y + 4, 4, 5);
+  ctx.fillStyle = "#f6e08a";
+  ctx.fillRect(x + 5, y + (t ? 5 : 4), 2, 3);
+  ctx.fillStyle = "#ffd84a";
+  ctx.fillRect(x + (t ? 6 : 4), y, 1, 1);
+}
+
+// 焚き火の夜: 薪
+function drawLogs(x, y) {
+  ctx.fillStyle = COLORS.woodDark;
+  ctx.fillRect(x, y + 2, 10, 2);
+  ctx.fillRect(x + 1, y, 8, 2);
+  ctx.fillStyle = "#c8a878";
+  ctx.fillRect(x + 1, y + 2, 1, 2);
+  ctx.fillRect(x + 8, y + 2, 1, 2);
+}
+
+// 焚き火の夜: テント（小・装飾）
+function drawTent(x, y) {
+  ctx.fillStyle = "#c86a3a";
+  for (let r = 0; r < 8; r++) {
+    const w = 1 + r;
+    ctx.fillRect(x + 5 - Math.floor(w / 2), y + r, w, 1);
+  }
+  ctx.fillRect(x - 1, y + 8, 12, 1);
+  ctx.fillStyle = "#8a3f22";
+  ctx.fillRect(x + 4, y + 4, 2, 4);
+}
+
+// 焚き火の夜: 米沢牛グリル
+function drawGrill(x, y) {
+  ctx.fillStyle = "#3a3a3a";
+  ctx.fillRect(x, y + 4, 12, 3);
+  ctx.fillStyle = "#5a5a5a";
+  ctx.fillRect(x, y + 3, 12, 1);
+  ctx.fillStyle = "#7c5330";
+  ctx.fillRect(x + 3, y + 2, 2, 1);
+  ctx.fillRect(x + 7, y + 2, 2, 1);
+  ctx.fillStyle = "#e0662f";
+  ctx.fillRect(x + 2, y + 5, 1, 1);
+  ctx.fillRect(x + 8, y + 5, 1, 1);
+  ctx.fillStyle = "#3a3a3a";
+  ctx.fillRect(x + 1, y + 7, 1, 3);
+  ctx.fillRect(x + 10, y + 7, 1, 3);
+}
+
+// 星空: 天の川
+function drawMilkyway(x, y) {
+  ctx.fillStyle = "#c8d0f0";
+  ctx.fillRect(x, y + 4, 14, 1);
+  ctx.fillRect(x + 2, y + 3, 10, 1);
   ctx.fillStyle = "#fdfdf2";
-  ctx.fillRect(x + 1, y, 1, 3);
-  ctx.fillRect(x, y + 1, 3, 1);
-  ctx.fillStyle = "#a8b0d8";
-  ctx.fillRect(x + 1, y + 3, 1, 1);
+  ctx.fillRect(x + 3, y + 4, 1, 1);
+  ctx.fillRect(x + 7, y + 3, 1, 1);
+  ctx.fillRect(x + 11, y + 4, 1, 1);
 }
 
-function drawPine(x, y) {
-  ctx.fillStyle = "#5a3a22";
-  ctx.fillRect(x + 4, y + 18, 3, 6);
-  // stacked triangles
-  ctx.fillStyle = "#2a5a3a";
-  ctx.fillRect(x + 2, y + 14, 7, 4);
-  ctx.fillRect(x + 1, y + 12, 9, 2);
-  ctx.fillStyle = "#3a6b4a";
-  ctx.fillRect(x + 3, y + 8, 5, 4);
-  ctx.fillRect(x + 2, y + 10, 7, 1);
-  ctx.fillStyle = "#4a7c5a";
-  ctx.fillRect(x + 4, y + 4, 3, 4);
-  ctx.fillRect(x + 5, y + 2, 1, 2);
-  // snow on top
-  ctx.fillStyle = "#fdfdf2";
-  ctx.fillRect(x + 5, y + 1, 1, 1);
-  ctx.fillRect(x + 4, y + 5, 1, 1);
-  ctx.fillRect(x + 7, y + 5, 1, 1);
-  ctx.fillRect(x + 8, y + 13, 1, 1);
+// 織りの間: 反物（米沢織）
+function drawClothRoll(x, y) {
+  ctx.fillStyle = "#26384f"; // 藍
+  ctx.fillRect(x, y, 10, 6);
+  ctx.fillStyle = "#d95f2b"; // 紅花
+  ctx.fillRect(x, y + 2, 10, 1);
+  ctx.fillStyle = COLORS.cream;
+  ctx.fillRect(x, y + 4, 10, 1);
+  ctx.fillStyle = "#1a2740";
+  ctx.fillRect(x, y, 1, 6);
+  ctx.fillRect(x + 9, y, 1, 6);
 }
 
-function drawSnowMound(x, y) {
-  ctx.fillStyle = "#fdfdf2";
-  ctx.fillRect(x, y + 2, 8, 3);
-  ctx.fillRect(x + 1, y + 1, 6, 1);
-  ctx.fillRect(x + 2, y, 4, 1);
-  ctx.fillStyle = "#dde8f0";
-  ctx.fillRect(x, y + 5, 8, 1);
+// 織りの間: 藍甕
+function drawIndigoVat(x, y) {
+  ctx.fillStyle = "#4a3a2a";
+  ctx.fillRect(x, y + 2, 10, 6);
+  ctx.fillRect(x + 1, y + 1, 8, 1);
+  ctx.fillStyle = "#26384f";
+  ctx.fillRect(x + 2, y + 2, 6, 2);
+  ctx.fillStyle = "#3a5a7d";
+  ctx.fillRect(x + 3, y + 2, 2, 1);
 }
 
-function drawSnowflake(x, y) {
-  ctx.fillStyle = "#fdfdf2";
-  ctx.fillRect(x + 2, y, 1, 5);
-  ctx.fillRect(x, y + 2, 5, 1);
-  ctx.fillRect(x + 1, y + 1, 1, 1);
-  ctx.fillRect(x + 3, y + 1, 1, 1);
-  ctx.fillRect(x + 1, y + 3, 1, 1);
-  ctx.fillRect(x + 3, y + 3, 1, 1);
+// 織りの間: 糸巻き
+function drawSpool(x, y) {
+  ctx.fillStyle = COLORS.woodDark;
+  ctx.fillRect(x, y, 6, 1);
+  ctx.fillRect(x, y + 5, 6, 1);
+  ctx.fillStyle = COLORS.accent;
+  ctx.fillRect(x + 1, y + 1, 4, 4);
+  ctx.fillStyle = COLORS.accentLight;
+  ctx.fillRect(x + 1, y + 2, 4, 1);
 }
 
-function drawCherryTree(x, y) {
-  // trunk
-  ctx.fillStyle = "#6b4a2b";
-  ctx.fillRect(x + 4, y + 14, 3, 10);
-  // canopy: pink puffs
-  ctx.fillStyle = "#f0a8c4";
-  ctx.fillRect(x, y + 4, 11, 9);
-  ctx.fillRect(x + 1, y + 2, 9, 2);
-  ctx.fillRect(x + 3, y, 5, 2);
-  ctx.fillStyle = "#d088a8";
-  ctx.fillRect(x + 1, y + 9, 2, 2);
-  ctx.fillRect(x + 7, y + 6, 2, 2);
-  // a couple of fallen petals
-  ctx.fillStyle = "#f8c4d8";
-  ctx.fillRect(x + 5, y + 12, 1, 1);
-  ctx.fillRect(x + 2, y + 13, 1, 1);
+// ---- goal sprites (end of the path) ----
+
+// 黒板（教室のゴール）
+function drawBoard(x, y) {
+  ctx.fillStyle = COLORS.woodDark;
+  ctx.fillRect(x + 2, y + 16, 2, 10);
+  ctx.fillRect(x + 14, y + 16, 2, 10);
+  ctx.fillStyle = COLORS.wood;
+  ctx.fillRect(x, y, 18, 18);
+  ctx.fillStyle = COLORS.board;
+  ctx.fillRect(x + 2, y + 2, 14, 14);
+  ctx.fillStyle = COLORS.chalk;
+  ctx.fillRect(x + 4, y + 5, 8, 1);
+  ctx.fillRect(x + 4, y + 8, 6, 1);
+  ctx.fillStyle = COLORS.accentLight; // ✓
+  ctx.fillRect(x + 11, y + 10, 1, 2);
+  ctx.fillRect(x + 12, y + 11, 1, 1);
+  ctx.fillRect(x + 13, y + 9, 1, 3);
 }
 
-function drawMailbox(x, y) {
-  ctx.fillStyle = COLORS.mailDark;
-  ctx.fillRect(x + 4, y + 10, 3, 16);
-  ctx.fillStyle = COLORS.mailRed;
-  ctx.fillRect(x, y + 2, 12, 10);
-  ctx.fillRect(x + 1, y + 1, 10, 1);
-  ctx.fillStyle = COLORS.mailDark;
-  ctx.fillRect(x + 2, y + 6, 8, 1); // slot
-  ctx.fillStyle = COLORS.mailBeige;
-  ctx.fillRect(x + 10, y + 3, 1, 5); // flag pole
-  ctx.fillStyle = "#e8c060";
-  ctx.fillRect(x + 11, y + 3, 2, 3); // flag
-  ctx.fillStyle = COLORS.mailDark;
-  ctx.fillRect(x, y + 12, 12, 1);
+// 校門（校庭のゴール・とここと表札）
+function drawGate(x, y) {
+  ctx.fillStyle = "#8a7a68";
+  ctx.fillRect(x, y + 2, 3, 24);
+  ctx.fillRect(x + 11, y + 2, 3, 24);
+  ctx.fillStyle = "#a89a86";
+  ctx.fillRect(x, y + 2, 3, 1);
+  ctx.fillRect(x + 11, y + 2, 3, 1);
+  ctx.fillStyle = COLORS.cream; // 表札
+  ctx.fillRect(x - 2, y + 8, 4, 8);
+  ctx.fillStyle = COLORS.accent;
+  ctx.fillRect(x - 2, y + 8, 4, 1);
+  ctx.fillStyle = COLORS.text;
+  ctx.fillRect(x, y + 10, 1, 1);
+  ctx.fillRect(x, y + 12, 1, 1);
+  ctx.fillRect(x, y + 14, 1, 1);
+}
+
+// 下駄箱（廊下のゴール）
+function drawShoeLockerGoal(x, y) {
+  ctx.fillStyle = COLORS.wood;
+  ctx.fillRect(x, y + 2, 14, 24);
+  ctx.fillStyle = COLORS.woodDark;
+  for (let j = 2; j <= 26; j += 6) ctx.fillRect(x, y + j, 14, 1);
+  for (let i = 0; i <= 14; i += 7) ctx.fillRect(x + i, y + 2, 1, 24);
+  ctx.fillStyle = COLORS.accentLight; // うわばき
+  ctx.fillRect(x + 2, y + 5, 4, 2);
+}
+
+// テント（焚き火のゴール）
+function drawTentGoal(x, y) {
+  ctx.fillStyle = "#c86a3a";
+  for (let r = 0; r < 12; r++) {
+    const w = 1 + r;
+    ctx.fillRect(x + 7 - Math.floor(w / 2), y + r, w, 1);
+  }
+  ctx.fillRect(x, y + 12, 14, 1);
+  ctx.fillStyle = "#8a3f22";
+  ctx.fillRect(x + 6, y + 6, 3, 6);
+  ctx.fillStyle = COLORS.accent; // 旗
+  ctx.fillRect(x + 7, y - 2, 3, 2);
+  ctx.fillStyle = COLORS.woodDark;
+  ctx.fillRect(x + 7, y - 2, 1, 3);
+}
+
+// 望遠鏡（星空のゴール）
+function drawTelescope(x, y) {
+  ctx.fillStyle = COLORS.woodDark;
+  ctx.fillRect(x + 4, y + 12, 2, 12);
+  ctx.fillRect(x + 1, y + 20, 2, 5);
+  ctx.fillRect(x + 8, y + 20, 2, 5);
+  ctx.fillStyle = "#4a5a8a";
+  ctx.fillRect(x + 4, y + 8, 8, 3);
+  ctx.fillRect(x + 9, y + 6, 3, 3);
+  ctx.fillStyle = "#6a7aaa";
+  ctx.fillRect(x + 4, y + 8, 8, 1);
+  ctx.fillStyle = COLORS.accent;
+  ctx.fillRect(x + 11, y + 5, 2, 2);
+}
+
+// 機織り機（織りの間のゴール）
+function drawLoom(x, y) {
+  ctx.fillStyle = COLORS.woodDark;
+  ctx.fillRect(x, y + 2, 2, 24);
+  ctx.fillRect(x + 12, y + 2, 2, 24);
+  ctx.fillRect(x, y + 2, 14, 2);
+  ctx.fillRect(x, y + 14, 14, 2);
+  ctx.fillStyle = COLORS.cream; // 経糸
+  for (let i = 3; i < 12; i += 2) ctx.fillRect(x + i, y + 4, 1, 10);
+  ctx.fillStyle = "#26384f"; // 織り上がり（藍）
+  ctx.fillRect(x + 2, y + 10, 10, 4);
+  ctx.fillStyle = COLORS.accent; // 紅花の一筋
+  ctx.fillRect(x + 2, y + 12, 10, 1);
 }
 
 // Pulsing "!" sign drawn above a postman that is calling for the user.
@@ -1242,6 +1412,8 @@ function drawHelpMark(cx, topY) {
   ctx.fillRect(cx + 1, topY - 7, 1, 2);
 }
 
+// 生徒（転校生） — walks to the right. ランドセル on the back (left edge),
+// 通学帽 (main = yellow) / 赤白帽 (sub) on the head. Body = agent color.
 function drawWalker(x, y, color, frameIdx, isMain) {
   // shadow
   ctx.fillStyle = "rgba(0,0,0,0.25)";
@@ -1257,20 +1429,22 @@ function drawWalker(x, y, color, frameIdx, isMain) {
     ctx.fillRect(x + 7, y + 13, 2, 3);
   }
 
-  // body (coat) — uses agent color
+  // ランドセル on the back (facing right → back is the left edge)
+  const satchel = isMain ? COLORS.accent : shade(color, -35);
+  ctx.fillStyle = satchel;
+  ctx.fillRect(x, y + 6, 3, 7);
+  ctx.fillStyle = shade(satchel, -22);
+  ctx.fillRect(x, y + 6, 3, 1);
+  ctx.fillRect(x, y + 12, 3, 1);
+  ctx.fillRect(x + 1, y + 9, 2, 1); // flap seam
+
+  // body (私服/体操服) — uses agent color
   ctx.fillStyle = color;
-  ctx.fillRect(x + 2, y + 7, 8, 6);
+  ctx.fillRect(x + 3, y + 7, 7, 6);
   ctx.fillStyle = shade(color, -25);
-  ctx.fillRect(x + 2, y + 12, 8, 1);
+  ctx.fillRect(x + 3, y + 12, 7, 1);
   ctx.fillStyle = shade(color, -40);
   ctx.fillRect(x + 4, y + 7, 4, 1);
-
-  // bag
-  ctx.fillStyle = "#c2a06b";
-  ctx.fillRect(x + 8, y + 9, 4, 4);
-  ctx.fillStyle = "#7b5b35";
-  ctx.fillRect(x + 8, y + 9, 4, 1);
-  ctx.fillRect(x + 9, y + 11, 2, 1);
 
   // head
   ctx.fillStyle = "#f6dfa9";
@@ -1279,12 +1453,23 @@ function drawWalker(x, y, color, frameIdx, isMain) {
   ctx.fillRect(x + 5, y + 5, 1, 1);
   ctx.fillRect(x + 7, y + 5, 1, 1);
 
-  // cap (red for main, soft tan for sub)
-  ctx.fillStyle = isMain ? "#bf4a3a" : "#a08055";
-  ctx.fillRect(x + 2, y + 1, 8, 2);
-  ctx.fillRect(x + 1, y + 2, 11, 1);
-  ctx.fillStyle = COLORS.mailBeige;
-  ctx.fillRect(x + 5, y + 1, 2, 1);
+  if (isMain) {
+    // 黄色い通学帽
+    ctx.fillStyle = "#f4c531";
+    ctx.fillRect(x + 2, y + 1, 8, 2);
+    ctx.fillRect(x + 1, y + 2, 11, 1); // brim
+    ctx.fillStyle = "#d9a417";
+    ctx.fillRect(x + 2, y + 2, 8, 1);
+    ctx.fillStyle = "#fff0b0";
+    ctx.fillRect(x + 5, y + 1, 2, 1);
+  } else {
+    // 赤白帽
+    ctx.fillStyle = "#d0463a";
+    ctx.fillRect(x + 2, y + 1, 8, 2);
+    ctx.fillRect(x + 1, y + 2, 11, 1);
+    ctx.fillStyle = COLORS.cream;
+    ctx.fillRect(x + 2, y + 2, 8, 1); // white band
+  }
 }
 
 function shade(hex, pct) {

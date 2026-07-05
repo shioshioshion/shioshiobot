@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 苔むす森のおしごと便り — uninstaller for macOS.
+# とここと 経営ダッシュボード — uninstaller for macOS.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"

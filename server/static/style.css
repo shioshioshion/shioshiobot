@@ -1,8 +1,9 @@
+/* とここと palette — 藍 (indigo) ground, 生成り text, 紅花 accent. */
 html, body {
   margin: 0;
   padding: 0;
-  background: #1c2018;
-  color: #e8e6d8;
+  background: #1a2636;
+  color: #e6ddc6;
   font-family: monospace;
   min-height: 100%;
   overflow-x: hidden;
@@ -17,9 +18,9 @@ html, body {
 #stage {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  background: #cde6c8;
-  box-shadow: 0 6px 24px rgba(0,0,0,0.4);
-  border: 2px solid #3b3a2a;
+  background: #eadfc4; /* theme-0 教室 sky */
+  box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+  border: 2px solid #26384f; /* 藍 */
 }
 
 #audio-controls {
@@ -31,9 +32,9 @@ html, body {
   z-index: 10;
 }
 #audio-controls button {
-  background: rgba(59,58,42,0.92);
-  color: #fdfdf2;
-  border: 1px solid #fdfdf2;
+  background: rgba(38,56,79,0.94); /* 藍 */
+  color: #f6efd9;
+  border: 1px solid #f6efd9;
   font-family: monospace;
   font-size: 13px;
   line-height: 1;
@@ -43,7 +44,7 @@ html, body {
   border-radius: 4px;
 }
 #audio-controls button:hover {
-  background: rgba(59,58,42,1);
+  background: rgba(38,56,79,1);
   transform: translateY(-1px);
 }
 #audio-controls button:active {
@@ -52,8 +53,10 @@ html, body {
 #audio-test {
   font-size: 16px;
   width: 34px;
+  color: #f0a35a; /* 紅花 light */
+  border-color: #f0a35a;
 }
 #audio-toggle.muted {
-  color: #888867;
-  border-color: #888867;
+  color: #7a8290;
+  border-color: #7a8290;
 }

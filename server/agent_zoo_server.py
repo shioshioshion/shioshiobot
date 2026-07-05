@@ -30,10 +30,12 @@ NAME_POOL = [
     "しずく", "ゆうな", "あおば", "ふう", "こはく", "つぐみ", "すみれ",
     "いお", "なぎさ", "ゆきの", "やよい", "わかば", "つきの", "ひなの",
 ]
+# 生徒の私服/体操服の色。とここと世界に合わせて、米沢織の染めに寄せた
+# 明るめのこども服カラー（紅花・藍・若草・山吹・葡萄など）。
 COLOR_POOL = [
-    "#7bb274", "#a8c97f", "#c2b280", "#d9a066", "#a0a060",
-    "#8fbc8f", "#6b8e23", "#9caf88", "#b9b58c", "#c8a26d",
-    "#80a26c", "#bda66e",
+    "#d9603f", "#e6893f", "#e8b93f", "#7bab54", "#3f9a86",
+    "#4a86c4", "#5a6fc0", "#9a63b0", "#c85a8a", "#c47a52",
+    "#6d9a4a", "#3f7a9a",
 ]
 PERSONALITIES = ["energetic", "calm", "shy", "playful"]
 
@@ -210,25 +212,25 @@ HELP_PHRASES = {
 # never gushing. Mirrors "You're all caught up!".
 DELIVERED_PHRASES = {
     "energetic": [
-        "ぶじ届けました",
+        "ぶじ提出できました",
         "完了でーす",
-        "とどけたー！（汗だく）",
+        "できたー！（汗だく）",
         "おつかれさまでした",
     ],
     "calm": [
-        "お届け完了です",
-        "ぶじ、届けました",
+        "提出、完了です",
+        "ぶじ、できました",
         "今日はこの辺で",
         "おわりました",
     ],
     "shy": [
-        "あの、ぶじ届けました",
+        "あの、ぶじできました",
         "おわりました…ふぅ",
         "なんとか、いけました",
         "おつかれさまでした…",
     ],
     "playful": [
-        "とどいた、とどいた",
+        "できた、できた",
         "ふふ、おしまい",
         "ぶじ完走（おやすみなさい）",
         "おしまい〜",
@@ -760,10 +762,10 @@ SUBSTOP_PHRASES = ["完了しました", "終わりました", "ぶじ戻りま�
 def speech_for(event_name, tool_name, tool_input):
     ti = tool_input or {}
     if event_name == "UserPromptSubmit":
-        return "あたらしい手紙が届いた！"
+        return "きょうの課題がきた！"
     if event_name == "Stop":
         # Per-personality phrase is set by handle_hook; this is a fallback.
-        return "ぶじ届けました…!"
+        return "ぶじ提出できました！"
     if event_name == "SessionStart":
         return "今日もおしごとはじめます"
     if event_name == "Notification":
@@ -788,12 +790,12 @@ def speech_for(event_name, tool_name, tool_input):
         if tool_name == "Grep":
             return f"「{keyword_from_pattern(ti.get('pattern',''))}」のあしあとを追う"
         if tool_name == "Glob":
-            return f"「{keyword_from_pattern(ti.get('pattern',''))}」のキノコを探す"
+            return f"「{keyword_from_pattern(ti.get('pattern',''))}」の教室をさがす"
         if tool_name == "WebFetch":
             return _pick_pool(WEBFETCH_PHRASES, "webfetch:" + str(now()))
         if tool_name in ("WebSearch", "web_search"):
             q = first_words(ti.get("query", ""), 14)
-            return f"「{q}」を森の外でしらべる…" if q else "もりの外をしらべる…"
+            return f"「{q}」を校門の外でしらべる…" if q else "まちに出てしらべる…"
         if tool_name in ("Task", "Agent"):
             d = first_words(ti.get("description", ""), 20) or "おつかい"
             return f"後輩に「{d}」を頼んだ"
@@ -805,13 +807,13 @@ def speech_for(event_name, tool_name, tool_input):
         if tool_name == "Thinking":
             return "うーん、考えこんでる…"
         if tool_name in ("Artifact", "create_artifact", "update_artifact"):
-            return "巻物をしたためる…"
+            return "ノートにまとめる…"
         if tool_name in ("Code", "code_execution", "repl"):
-            return "まじないを唱える"
+            return "計算ドリル中"
         if tool_name in ("Drive", "drive_search", "google_drive_search"):
-            return "むらの倉をのぞく"
+            return "図書室をのぞく"
         if tool_name in ("Image", "create_image", "image_generation"):
-            return "絵筆をとる…"
+            return "図工の時間…"
         if tool_name in ("ComputerUse", "computer_use"):
             return "ふしぎな道具を使ってる…"
         if tool_name and tool_name.startswith("mcp__"):
@@ -880,7 +882,7 @@ def ensure_agent(sid, agent_id, label=""):
             "is_main": is_main,
             "progress": 0.0,
             "tool_count": 0,
-            "say": "森の入口でしたくちゅう…" if is_main else "おてつだいに来ました！",
+            "say": "昇降口でうわばきに履き替え中…" if is_main else "転校してきました！",
             "say_until": now() + 5,
             "active": True,
             "ended": False,

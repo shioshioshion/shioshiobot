@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 苔むす森のおしごと便り — diagnostic.
+# とここと 経営ダッシュボード — diagnostic.
 # Run this if Claude Code activity is not showing up in the visualiser.
 set -uo pipefail
 
@@ -13,7 +13,7 @@ warn() { printf "  \033[33m!\033[0m %s\n" "$1"; }
 info() { printf "      → %s\n" "$1"; }
 
 echo
-echo "苔むす森のおしごと便り — 診断"
+echo "とここと 経営ダッシュボード — 診断"
 echo "================================"
 
 # 1. Server reachable
